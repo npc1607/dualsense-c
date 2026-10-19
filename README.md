@@ -10,12 +10,12 @@
 - **纯 Go 实现、零 CGO 依赖**：Linux 环境原生读写 `/dev/hidraw`，Windows 环境直接调用 HID API。
 - **高确定性与容错机制**：信号超时自动降级、力反馈释放平滑衰减（防止机械突弹）、配置启动期编译校验。
 
-```
-游戏数据 ──► [Source 适配器] ──► [signal.Set] ──► [rules 表达式引擎] ──► [sink 输出时钟] ──► DualSense
-             trigger / udp / sim     归一化 [0, 1]      平滑 / 限速 / 衰减      125 ~ 250 Hz       hidraw / HID
-                  ▲                                          ▲
-                  └───────────── profiles/*.yaml ────────────┘
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="dualsense-c 架构设计与数据流" width="100%">
+</p>
+<p align="center">
+  <sub>（注：架构图源文件见 <a href="docs/architecture.excalidraw">docs/architecture.excalidraw</a>，支持在 <a href="https://excalidraw.com">Excalidraw</a> 中导入编辑）</sub>
+</p>
 
 ---
 

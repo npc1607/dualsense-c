@@ -12,4 +12,7 @@ import (
 
 	// audio envelope (bass/mid/loudness) from a PipeWire monitor
 	_ "github.com/npc1607/dualsense-c/internal/source/audio"
+
+	// force feedback captured by a virtual gamepad (ds5vpad)
+	_ "github.com/npc1607/dualsense-c/internal/source/ffb"
 )

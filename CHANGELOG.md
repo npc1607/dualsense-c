@@ -6,6 +6,26 @@
 ## Unreleased
 
 ### 新增
+- `source/audio`：抓 PipeWire monitor → 三段带通（`bass` 20-110Hz、`mid` 160-450Hz）
+  与全带 `loudness` 的包络信号，attack/release 可配，纯 Go + CLI 子进程
+- `sink/haptics`：往 DS5 的 4 声道 USB 声卡 Ch3/4 写 48kHz PCM 驱动音圈，
+  新增 `haptic_left` / `haptic_right` target 与 profile 的 `haptics:` 配置块
+- `source/ffb` + `cmd/ds5vpad`：uinput 虚拟 Xbox 手柄 + 独占物理手柄，
+  捕获游戏 FF_RUMBLE 上传幅度并经 UDP 9998 交给 ds5d；`tools/ffclient` 可离线验证
+- 新增 `audio-haptics` 与 `ffb-recoil` 两个内置 profile
+- `internal/vpad` 平台分层：Linux 用 uinput 实现，Windows 留 ViGEm 接口占位
+- 新增 `udev/71-ds5vpad.rules`
+
+### 修复（均为真机功能测试发现）
+- `source/audio`：空闲 sink 会让 `ReadFull` 永久阻塞、源再也不发帧，下游看到过期值；
+  改为带读超时，空闲时主动输出衰减帧
+- `source/audio`：包络原本每个音频块只调一次 `step`，而系数是按每采样算的，
+  90ms 的释放被拉长到约 23 秒；改为按块长度解析衰减 `stepN`
+- `source/audio` / `sink/haptics`：`pw-record` / `pw-cat` 的 `--target` 在部分
+  PipeWire 版本上被静默忽略（实测录到的是默认节点），默认命令改用 `parec` / `pacat`
+- `sink/haptics`：`DetectSink` 把 `pactl` 整行（含格式/状态）当成 sink 名
+
+### 新增（ACR / ACC / AC Rally 路面反馈）
 - AC / ACC / AC Rally 桥接新增底盘与路面信号：`accel_g`（accG[1] 垂直加速度，已归一为 G）、
   `lat_g`（accG[0]）、`steer`、`surface`（四轮 `tyreDirtyLevel` 最大值）、
   `custom1`（`carDamage` 最大值）、`custom2`（`suspensionTravel` 最大值）

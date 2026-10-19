@@ -34,6 +34,9 @@ var Standard = []string{
 
 	// Audio envelope (source/audio): 0..1, already smoothed and normalised.
 	"bass", "mid", "loudness",
+
+	// Force feedback captured from a virtual pad (source/ffb): 0..1 per motor.
+	"ffb_left", "ffb_right",
 }
 
 var standard = func() map[string]struct{} {

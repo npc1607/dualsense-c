@@ -1,0 +1,80 @@
+# 力反馈镜像（把任意游戏的震动变成 DualSense 触感 + 扳机后坐力）
+#
+# 链路：
+#   游戏 → 虚拟手柄（ds5vpad 用 uinput 创建并独占物理手柄）
+#        → ds5vpad 捕获 FF 上传的 rumble 幅度 → UDP 127.0.0.1:9998
+#        → source/ffb → ffb_left / ffb_right 信号 → 本 profile
+#
+# 为什么需要虚拟手柄：游戏只会把手柄震动发给它正在对话的那个设备。
+# 只要 Steam Input 占着物理手柄，外部程序就永远看不到震动指令。
+#
+# 用法：
+#   ./bin/ds5vpad &                              # 建虚拟手柄并独占物理手柄
+#   ./bin/ds5d -profile ffb-recoil -rate 125     # 消费 9998 上的 FF
+#   （然后在 Steam 里关掉该游戏的 Steam Input，让游戏认虚拟手柄）
+#
+# 验证链路（不用开游戏）：
+#   ./bin/ffclient -dev /dev/input/eventN         # 手动播放 rumble
+name: ffb-recoil
+title: 力反馈镜像（虚拟手柄捕获 FF → 触感 + 后坐力）
+description: |
+  把游戏的标准力反馈（FF_RUMBLE）映射成 DualSense 的双马达震动与 R2 后坐力脉冲。
+  HID 强度不足时还可以叠加 haptics 音圈输出。
+
+source:
+  type: ffb
+  listen: "127.0.0.1:9998"
+
+safety:
+  signal_ttl: 300ms
+  release: 120ms
+  status_lightbar: false
+
+rules:
+  # ---- 低频马达（strong）→ 左马达 + 音圈，保留游戏原始手感 --------------
+  - name: ffb-left
+    when: 'has("ffb_left") && ffb_left > 0.02'
+    target: rumble_left
+    priority: 10
+    value: "clamp(255 * ffb_left, 0, 255)"
+
+  - name: ffb-left-coil
+    when: 'has("ffb_left") && ffb_left > 0.02'
+    target: haptic_left
+    priority: 10
+    value: "clamp(255 * ffb_left, 0, 255)"
+
+  # ---- 高频马达（weak）→ 右马达 ------------------------------------------
+  - name: ffb-right
+    when: 'has("ffb_right") && ffb_right > 0.02'
+    target: rumble_right
+    priority: 10
+    value: "clamp(255 * ffb_right, 0, 255)"
+
+  - name: ffb-right-coil
+    when: 'has("ffb_right") && ffb_right > 0.02'
+    target: haptic_right
+    priority: 10
+    value: "clamp(235 * ffb_right, 0, 235)"
+
+  # ---- 强震动 → R2 后坐力（射击类游戏的"开火"体感） ----------------------
+  - name: recoil
+    when: 'has("ffb_right") && ffb_right > 0.45'
+    target: r2
+    priority: 40
+    hold: 90ms
+    effect: weapon
+    params:
+      start: "2"
+      amp_a: "clamp(180 * ffb_right, 0, 255)"
+      amp_b: "clamp(120 * ffb_right, 0, 255)"
+      freq: "clamp(30 * ffb_right, 5, 30)"
+
+  # ---- 灯条：随震动亮度 ------------------------------------------------
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(200 * ffb_left, 0, 200)"
+      g: "clamp(200 * ffb_right, 0, 200)"
+      b: "20"

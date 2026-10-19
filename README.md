@@ -273,6 +273,20 @@ go run ./tools/bridgesim -port 9999
 | `sniff -listen <addr>` | 十六进制转储指定端口接收到的 UDP 遥测数据包（用于字段逆向校准） |
 | `version` | 打印工具版本信息 |
 
+### `ds5vpad`（虚拟手柄 / 力反馈捕获）
+
+Uinput 虚拟 Xbox 360 手柄 + 独占物理手柄，把手柄输入转发给游戏，同时把游戏发来的
+力反馈（FF_RUMBLE）发布到 UDP `127.0.0.1:9998` 供 `source/ffb` 消费。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `-name` | `ds5vpad virtual pad` | 游戏看到的设备名 |
+| `-grab` | 自动识别 | 要独占的物理 evdev 节点 |
+| `-publish` | `127.0.0.1:9998` | 力反馈发布地址 |
+| `-hz` | `60` | 发布频率 |
+
+`ffclient` 用于不开游戏验证力反馈链路：`./bin/ffclient -dev /dev/input/eventN`。
+
 ---
 
 ## Profile 配置规范
@@ -320,6 +334,24 @@ rules:
     value: "230"
     modulate: { type: sine, hz: 24, depth: 0.65 }
 ```
+
+### 音圈触感（`haptics:` 块）
+
+DS5 同时是一块 4 声道 48kHz USB 声卡，Ch3/4 直连左右音圈。HID 震动字节只能表达
+「振幅 + 一个调幅频率」，是音圈的低分辨率近似；写 PCM 才能真正还原频谱与瞬态。
+
+```yaml
+haptics:
+  target: auto        # PipeWire sink 名，或 auto 自动找 DualSense
+  carrier_hz: 55      # 合成波形基频
+  gain: 0.55          # 0..255 规则输出 → PCM 幅度
+  command: "pacat --playback --device={target} --rate={rate} --channels={channels} --format=s16le --raw"
+```
+
+规则用 `haptic_left` / `haptic_right` 两个 target 驱动它（与 `rumble_*` 同构，支持 `value` + `modulate`）。
+
+> 实测注意事项：`pw-record` / `pw-cat` 的 `--target` 在部分 PipeWire 版本上会被静默忽略，
+> 因此默认使用 PulseAudio 兼容的 `parec` / `pacat`（本项目在 PipeWire 1.x 上实测验证）。
 
 ### 表达式语法
 
@@ -392,6 +424,8 @@ modulate: { type: square, hz: 30, depth: 1.0 }  # 方波调幅（适用于机械
 | **车辆遥测** | `throttle`, `brake`, `clutch`, `slip`, `lockup`, `abs`, `tc`, `rumble`：归一化至 `[0, 1]`<br>`steer`：方向盘转角，取值范围 `[-1, 1]`<br>`speed`：时速（km/h）<br>`rpm`：转速，按红线转速归一化至 `[0, 1]`<br>`gear`：档位数值<br>`accel_g`, `lat_g`：加速度 G 值<br>`surface`：路面材质标识 |
 | **手柄按键与摇杆** | `l2`, `r2`：模拟量行程，取值范围 `[0, 1]`<br>`l2_full`, `r2_full`：行程触底开关（bool）<br>`l1`, `r1`, `cross`, `circle`, `square`, `triangle`, `up`, `down`, `left`, `right`, `ps`, `touchpad`, `mute`：按键状态（bool）<br>`lx`, `ly`, `rx`, `ry`：摇杆坐标，取值范围 `[-1, 1]`<br>`stick_l`, `stick_r`：摇杆下压开关（bool） |
 | **手柄传感器与状态** | `gyro_x`, `gyro_y`, `gyro_z`：6 轴角速度（小端 int16 归一化至 `[-1, 1]`）<br>`accel_x`, `accel_y`, `accel_z`：6 轴线性加速度（小端 int16 归一化至 `[-1, 1]`）<br>`touch_x`, `touch_y`：触控板首个触点归一化坐标 `[0, 1]`（基于 1920×1080 分辨率）<br>`touch_active`：触控板是否处于触摸接触状态（bool）<br>`battery`：电池电量等级（`0.0 ~ 1.0`，以 10% 步长递增）<br>`charging`：电池充电中标志（bool） |
+| **音频包络（source/audio）** | `bass`（20~110Hz）、`mid`（160~450Hz）、`loudness`（全带）：归一化 `[0, 1]`，已做 attack/release 平滑 |
+| **力反馈（source/ffb）** | `ffb_left`、`ffb_right`：虚拟手柄捕获到的游戏 rumble 幅度，`[0, 1]` |
 | **自定义扩展** | `custom0` ~ `custom3`：供特殊遥测项绑定的用户自定义通道 |
 
 各解码器的具体映射实现可参阅 `internal/source/udp/decoders.go`。
@@ -509,9 +543,9 @@ profiles/                 用户自定义 Profile 目录
 - [x] **Assetto Corsa / ACC / AC Rally**：提供 `ds5bridge` Proton 桥接支持与 `acshm` 解码器
 - [x] **全手柄传感器与状态接入**：陀螺仪与加速度计（6 轴）、触控板坐标、电量/充电状态，以及静音灯与玩家指示灯控制
 - [x] **充电呼吸灯与三角函数支持**：规则引擎内置 `sin` / `cos`，通用 Profile 自动支持充电淡蓝呼吸与满电常亮
-- [ ] **高清音圈触感（Voice-Coil Haptics）**：通过 USB 4 声道音频直通驱动左右音圈致动器，适配 Linux（`pw-cat/aplay` 管道）与 Windows（WASAPI 独占流）
-- [ ] **力反馈镜像驱动（`source/ffb`）**：通过 uinput 虚拟设备捕获标准游戏力反馈，让无遥测游戏转化为后坐力
-- [ ] **音频包络触感推断（`source/audio`）**：基于 PipeWire 捕获系统低频音频生成自适应触感
+- [x] **高清音圈触感（Voice-Coil Haptics）**：`sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM 驱动左右音圈（`haptic_left` / `haptic_right` target），Linux 已验证；Windows 走 `haptics.command` 换成 WASAPI 侧命令即可
+- [x] **力反馈镜像驱动（`source/ffb`）**：`ds5vpad` 用 uinput 建虚拟 Xbox 手柄并独占物理手柄，捕获 FF_RUMBLE 上传幅度后经 UDP 9998 交给 `ds5d`（Linux 已验证；Windows 后端见 `internal/vpad/vpad_windows.go`）
+- [x] **音频包络触感推断（`source/audio`）**：`parec` 抓 monitor → 三段带通（bass/mid/loudness）包络，可直接驱动音圈或马达
 - [ ] **rFactor 2 / LMU、ETS2 / ATS**：基于桥接架构扩展共享内存布局解析
 - [ ] **iRacing 支持**：接入 iRacing 内存映射 SDK
 - [ ] **触控板多指手势识别**：支持双指滑动、捏合映射为虚拟轮盘/旋钮

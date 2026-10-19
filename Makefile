@@ -11,6 +11,8 @@ all: build bridge
 build:
 	$(GO) build $(GOFLAGS) -o $(BIN)/ds5d ./cmd/ds5d
 	$(GO) build $(GOFLAGS) -o $(BIN)/ds5ctl ./cmd/ds5ctl
+	$(GO) build $(GOFLAGS) -o $(BIN)/ds5vpad ./cmd/ds5vpad
+	$(GO) build $(GOFLAGS) -o $(BIN)/ffclient ./tools/ffclient
 
 # The shared-memory bridge is a Windows binary: it runs inside a Proton prefix.
 bridge:
@@ -35,7 +37,7 @@ fmt:
 ci: fmt vet test
 
 install-udev:
-	sudo cp udev/70-dualsense.rules /etc/udev/rules.d/
+	sudo cp udev/70-dualsense.rules udev/71-ds5vpad.rules /etc/udev/rules.d/
 	sudo udevadm control --reload-rules
 	sudo udevadm trigger
 	@echo "now unplug and replug the controller"

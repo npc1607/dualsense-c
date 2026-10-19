@@ -42,7 +42,9 @@ type Config struct {
 	Command string
 }
 
-const defaultCommand = "pw-cat --playback --target={target} --rate={rate} --channels={channels} --format=s16 --raw -"
+// pacat (PulseAudio compat) honours --device; pw-cat's --target is silently
+// ignored by some PipeWire versions, which would play into the wrong sink.
+const defaultCommand = "pacat --playback --device={target} --rate={rate} --channels={channels} --format=s16le --raw"
 
 // Writer mixes a continuous 4-channel stream. Channels 1/2 are kept silent and
 // channels 3/4 carry the haptic waveform.
@@ -178,11 +180,11 @@ func DetectSink() (string, error) {
 	}
 	best := ""
 	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.SplitN(line, "\t", 2)
+		fields := strings.Split(line, "\t")
 		if len(fields) < 2 {
 			continue
 		}
-		name := fields[1]
+		name := strings.TrimSpace(fields[1])
 		low := strings.ToLower(name)
 		if strings.Contains(low, "dualsense") || strings.Contains(low, "054c") {
 			best = name

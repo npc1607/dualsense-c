@@ -20,6 +20,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -33,10 +34,15 @@ func init() { source.Register("audio", New) }
 
 // defaults, all overridable from the profile's source block.
 const (
-	defCommand   = "pw-record --target={target} --rate={rate} --channels={channels} --format={format} -"
-	defRate      = 24000
-	defChannels  = 2
-	defFormat    = "f32"
+	// parec (PulseAudio compat) is the reliable one: on this PipeWire version
+	// pw-record accepts --target but silently ignores it and records the default
+	// node instead, which makes the capture look like permanent silence.
+	// Verified on hardware: parec honours --device, pw-record did not.
+	defCommand  = "parec --device={target} --rate={rate} --channels={channels} --format={format} --raw"
+	defRate     = 24000
+	defChannels = 2
+	// parec spells formats as PulseAudio names (float32le), not PipeWire's f32.
+	defFormat    = "float32le"
 	defEmitHz    = 60
 	defBassLow   = 20.0
 	defBassHigh  = 110.0
@@ -68,6 +74,7 @@ type Source struct {
 //
 //	target       PipeWire sink or monitor name to record from (required)
 //	command      capture command template, {target}/{rate}/{channels}/{format}
+//	             (default: parec; pw-record's --target is ignored on some versions)
 //	rate         capture sample rate (default 24000)
 //	channels     capture channel count (default 2)
 //	format       sample format passed to the command (default f32)
@@ -237,55 +244,87 @@ func (s *Source) Run(ctx context.Context, out chan<- signal.Frame) error {
 	return io.EOF
 }
 
+// idleAfter is how long the capture may stay silent before we start emitting
+// decaying frames ourselves. PipeWire suspends an idle sink and stops pushing
+// audio, so a blocking read would stall the source forever and leave the last
+// loud value frozen downstream.
+const idleAfter = 80 * time.Millisecond
+
 // consume decodes f32le PCM, filters it into bands and emits envelope frames.
+//
+// Reads use a deadline slightly longer than one block so an idle sink (PipeWire
+// suspends it and stops pushing audio) cannot stall the source: on timeout we
+// feed the envelope a silent block so rumble fades out instead of freezing.
 func (s *Source) consume(ctx context.Context, r io.Reader, out chan<- signal.Frame) error {
-	const block = 1024 // frames per read
-	raw := make([]byte, block*s.channels*4)
-	sample := make([]float32, 0, block)
+	const blockFrames = 256 // ~43 ms at 24 kHz: must fit inside idleAfter
+	frameBytes := 4 * s.channels
+	raw := make([]byte, blockFrames*frameBytes)
+	var pending []byte
+	sample := make([]float32, 0, blockFrames)
 	emit := time.Second / time.Duration(s.emitHz)
 	next := time.Now()
+	deadline := time.Now().Add(idleAfter)
+
+	flush := func() bool { // returns false when ctx is done
+		now := time.Now()
+		if now.Before(next) {
+			return true
+		}
+		next = now.Add(emit)
+		select {
+		case out <- signal.Frame{At: now, Values: map[string]float32{
+			"bass":     float32(s.bassEnv.y),
+			"mid":      float32(s.midEnv.y),
+			"loudness": float32(s.loudEnv.y),
+		}}:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
 
 	for {
 		if ctx.Err() != nil {
 			return nil
 		}
-		n, err := io.ReadFull(r, raw)
+		if f, ok := r.(interface{ SetReadDeadline(time.Time) error }); ok {
+			_ = f.SetReadDeadline(deadline)
+		}
+		n, err := r.Read(raw)
+		if n > 0 {
+			deadline = time.Now().Add(idleAfter)
+			pending = append(pending, raw[:n]...)
+			frames := len(pending) / frameBytes
+			if frames > 0 {
+				sample = sample[:0]
+				for i := 0; i < frames; i++ {
+					var sum float32
+					for c := 0; c < s.channels; c++ {
+						off := i*frameBytes + c*4
+						sum += math.Float32frombits(binary.LittleEndian.Uint32(pending[off:]))
+					}
+					sample = append(sample, sum/float32(s.channels))
+				}
+				pending = pending[frames*frameBytes:]
+				s.measure(sample)
+				if !flush() {
+					return nil
+				}
+			}
+		}
 		if err != nil {
-			if err == io.ErrUnexpectedEOF || err == io.EOF {
+			if isTimeout(err) {
+				s.measure(nil) // decay the envelopes
+				if !flush() {
+					return nil
+				}
+				deadline = time.Now().Add(idleAfter)
+				continue
+			}
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				return nil
 			}
 			return fmt.Errorf("audio: read: %w", err)
-		}
-		frames := n / (4 * s.channels)
-		sample = sample[:0]
-		for i := 0; i < frames; i++ {
-			var sum float32
-			for c := 0; c < s.channels; c++ {
-				off := (i*s.channels + c) * 4
-				sum += math.Float32frombits(binary.LittleEndian.Uint32(raw[off:]))
-			}
-			sample = append(sample, sum/float32(s.channels))
-		}
-
-		bass, mid, loud := s.measure(sample)
-
-		now := time.Now()
-		if now.Before(next) {
-			continue
-		}
-		next = now.Add(emit)
-		f := signal.Frame{
-			At: now,
-			Values: map[string]float32{
-				"bass":     float32(bass),
-				"mid":      float32(mid),
-				"loudness": float32(loud),
-			},
-		}
-		select {
-		case out <- f:
-		case <-ctx.Done():
-			return nil
 		}
 	}
 }
@@ -301,13 +340,15 @@ func (s *Source) measure(samples []float32) (bass, mid, loud float64) {
 		midSum += m * m
 		allSum += float64(x) * float64(x)
 	}
-	if len(samples) == 0 {
-		return 0, 0, 0
-	}
 	n := float64(len(samples))
-	bass = s.normalise(s.bassEnv.step(math.Sqrt(bassSum / n)))
-	mid = s.normalise(s.midEnv.step(math.Sqrt(midSum / n)))
-	loud = s.normalise(s.loudEnv.step(math.Sqrt(allSum / n)))
+	if n == 0 {
+		// Still step the envelopes down so silence actually decays.
+		n = 1
+	}
+	steps := len(samples)
+	bass = s.normalise(s.bassEnv.stepN(math.Sqrt(bassSum/n), steps))
+	mid = s.normalise(s.midEnv.stepN(math.Sqrt(midSum/n), steps))
+	loud = s.normalise(s.loudEnv.stepN(math.Sqrt(allSum/n), steps))
 	return bass, mid, loud
 }
 
@@ -412,12 +453,20 @@ func newEnvFollower(attackMS, releaseMS, rate float64) *envFollower {
 	}
 }
 
-func (e *envFollower) step(x float64) float64 {
+// stepN applies the one-pole law over n samples at once.
+//
+// The coefficients are per-sample, and measure() runs once per block, so
+// stepping only once per block would stretch a 90 ms release into ~23 s.
+func (e *envFollower) stepN(x float64, n int) float64 {
+	if n < 1 {
+		n = 1
+	}
 	c := e.release
 	if x > e.y {
 		c = e.attack
 	}
-	e.y += c * (x - e.y)
+	k := math.Pow(1-c, float64(n))
+	e.y = x + (e.y-x)*k
 	return e.y
 }
 
@@ -434,10 +483,23 @@ func detectMonitor() (string, error) {
 		return "", fmt.Errorf("audio: target=auto needs pactl: %w", err)
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.SplitN(line, "\t", 2)
-		if len(fields) == 2 && strings.HasSuffix(fields[1], ".monitor") {
-			return fields[1], nil
+		fields := strings.Split(line, "\t")
+		if len(fields) >= 2 {
+			name := strings.TrimSpace(fields[1])
+			if strings.HasSuffix(name, ".monitor") {
+				return name, nil
+			}
 		}
 	}
 	return "", errors.New("audio: target=auto found no monitor source")
+}
+
+// isTimeout reports whether err is a read deadline expiry.
+func isTimeout(err error) bool {
+	type timeout interface{ Timeout() bool }
+	var t timeout
+	if errors.As(err, &t) {
+		return t.Timeout()
+	}
+	return os.IsTimeout(err)
 }

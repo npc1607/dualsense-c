@@ -1,176 +1,173 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 670" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 890" width="100%" height="100%">
   <defs>
-    <!-- 阴影与手绘风格滤镜 -->
-    <filter id="card-shadow" x="-4%" y="-4%" width="108%" height="108%" filterUnits="userSpaceOnUse">
-      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.06"/>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.07"/>
     </filter>
-    <filter id="accent-shadow" x="-5%" y="-5%" width="110%" height="110%" filterUnits="userSpaceOnUse">
-      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#e03131" flood-opacity="0.12"/>
+    <filter id="red-shadow" x="-4%" y="-4%" width="108%" height="108%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#e03131" flood-opacity="0.10"/>
     </filter>
-    <marker id="arrow-gray" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-      <path d="M 0 1 L 7 4 L 0 7 Z" fill="#495057" />
+    <marker id="arrow-gray" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#495057" />
     </marker>
-    <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-      <path d="M 0 1 L 7 4 L 0 7 Z" fill="#e03131" />
+    <marker id="arrow-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#e03131" />
     </marker>
     <style>
-      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-weight: 700; fill: #1e1e1e; }
-      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", sans-serif; font-weight: 500; fill: #495057; }
-      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 16px; }
-      .card-sub { font-family: "SF Mono", "Consolas", Menlo, monospace; font-size: 11px; fill: #868e96; }
-      .card-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 12px; fill: #343a40; }
-      .flow-tag { font-family: "SF Mono", "Consolas", Menlo, monospace; font-size: 11px; fill: #495057; font-weight: 600; text-anchor: middle; }
-      .cfg-tag { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 11px; font-weight: 600; fill: #c92a2a; text-anchor: middle; }
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-weight: 800; fill: #1e1e1e; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 500; fill: #495057; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 19px; }
+      .card-sub { font-family: "SF Mono", "Consolas", Menlo, monospace; font-size: 13px; fill: #868e96; }
+      .card-item { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 14.5px; fill: #2b2b2b; }
+      .tag-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13px; font-weight: 600; fill: #495057; text-anchor: middle; }
+      .cfg-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13px; font-weight: 700; fill: #c92a2a; text-anchor: middle; }
     </style>
   </defs>
 
-  <!-- 背景底色 -->
   <rect width="100%" height="100%" fill="#ffffff" rx="16"/>
 
-  <!-- 顶部标题区域 -->
-  <g transform="translate(780, 50)" text-anchor="middle">
-    <text class="title" font-size="28" y="0">dualsense-c 架构设计与数据流</text>
-    <text class="subtitle" font-size="15" y="30">PS5 DualSense 自适应扳机与力反馈四层驱动流水线</text>
+  <!-- 顶部主副标题 -->
+  <g transform="translate(590, 50)" text-anchor="middle">
+    <text class="title" font-size="30" y="0">dualsense-c 架构设计与数据流</text>
+    <text class="subtitle" font-size="16" y="32">PS5 DualSense 自适应扳机与力反馈四层驱动流水线</text>
   </g>
 
-  <!-- ================= 主流水线卡片 ================= -->
+  <!-- ================= 第一行流水线 (从左到右) ================= -->
 
-  <!-- 卡片 0: 游戏 / 输入源 -->
-  <g transform="translate(40, 140)" filter="url(#card-shadow)">
-    <rect width="180" height="260" rx="12" fill="#f8f9fa" stroke="#adb5bd" stroke-width="2"/>
-    <text class="card-title" x="90" y="35" text-anchor="middle" fill="#212529">游戏 / 输入源</text>
-    <text class="card-sub" x="90" y="55" text-anchor="middle">Game &amp; Inputs</text>
-    <line x1="20" y1="70" x2="160" y2="70" stroke="#dee2e6" stroke-width="1.5" stroke-dasharray="4,4"/>
-    <g class="card-body" transform="translate(16, 95)">
-      <text y="0">• FPS 扳机行程驱动</text>
-      <text y="28">• UDP 原生遥测</text>
-      <text y="46" font-size="11" fill="#868e96" x="12">Forza / BeamNG / DiRT</text>
-      <text y="74">• Proton 共享内存</text>
-      <text y="92" font-size="11" fill="#868e96" x="12">AC / ACC / AC Rally</text>
-      <text y="120">• 仿真模拟器 (sim)</text>
+  <!-- 卡片 1: 游戏 / 输入源 -->
+  <g transform="translate(50, 130)" filter="url(#shadow)">
+    <rect width="320" height="220" rx="14" fill="#f8f9fa" stroke="#adb5bd" stroke-width="2"/>
+    <text class="card-title" x="160" y="36" text-anchor="middle" fill="#212529">游戏 / 输入源</text>
+    <text class="card-sub" x="160" y="56" text-anchor="middle">Game &amp; Physical Inputs</text>
+    <line x1="25" y1="72" x2="295" y2="72" stroke="#dee2e6" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• FPS 扳机物理行程驱动 (L2/R2)</text>
+      <text y="28">• 原生 UDP 遥测 (Forza / BeamNG)</text>
+      <text y="56">• Proton 共享内存 (AC / ACC / ACR)</text>
+      <text y="84">• 仿真测试数据源 (sim / bridgesim)</text>
     </g>
   </g>
 
-  <!-- 连线 0 -> 1 -->
-  <line x1="220" y1="270" x2="274" y2="270" stroke="#495057" stroke-width="2" marker-end="url(#arrow-gray)"/>
-  <text class="flow-tag" x="247" y="258">原始输入</text>
+  <!-- 箭头 1 -> 2 -->
+  <line x1="370" y1="240" x2="420" y2="240" stroke="#495057" stroke-width="2.2" marker-end="url(#arrow-gray)"/>
+  <rect x="375" y="212" width="50" height="20" rx="4" fill="#f1f3f5"/>
+  <text class="tag-text" x="400" y="226">原始输入</text>
 
-  <!-- 卡片 1: Source 适配器 -->
-  <g transform="translate(280, 140)" filter="url(#card-shadow)">
-    <rect width="200" height="260" rx="12" fill="#ebfbee" stroke="#0ca678" stroke-width="2"/>
-    <text class="card-title" x="100" y="35" text-anchor="middle" fill="#0ca678">① Source 适配器</text>
-    <text class="card-sub" x="100" y="55" text-anchor="middle">internal/source</text>
-    <line x1="20" y1="70" x2="180" y2="70" stroke="#b2f2bb" stroke-width="1.5" stroke-dasharray="4,4"/>
-    <g class="card-body" transform="translate(18, 98)">
-      <text y="0">• 类型: trigger / udp / sim</text>
-      <text y="28">• 原始遥测协议解码</text>
-      <text y="56">• 扳机按键行程提取</text>
-      <text y="84">• 打时间戳与更新追踪</text>
-      <text y="112">• 异步采样与限速</text>
+  <!-- 卡片 2: ① Source 适配器 -->
+  <g transform="translate(430, 130)" filter="url(#shadow)">
+    <rect width="320" height="220" rx="14" fill="#ebfbee" stroke="#0ca678" stroke-width="2"/>
+    <text class="card-title" x="160" y="36" text-anchor="middle" fill="#0ca678">① Source 适配器</text>
+    <text class="card-sub" x="160" y="56" text-anchor="middle">internal/source</text>
+    <line x1="25" y1="72" x2="295" y2="72" stroke="#b2f2bb" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• 支持类型: trigger / udp / sim</text>
+      <text y="28">• 原始遥测协议解码与动态字段解析</text>
+      <text y="56">• 扳机按键行程采样与时间戳记录</text>
+      <text y="84">• 数据刷新率控制与异常容错保护</text>
     </g>
   </g>
 
-  <!-- 连线 1 -> 2 -->
-  <line x1="480" y1="270" x2="534" y2="270" stroke="#495057" stroke-width="2" marker-end="url(#arrow-gray)"/>
-  <text class="flow-tag" x="507" y="258">归一化</text>
+  <!-- 箭头 2 -> 3 -->
+  <line x1="750" y1="240" x2="800" y2="240" stroke="#495057" stroke-width="2.2" marker-end="url(#arrow-gray)"/>
+  <rect x="755" y="212" width="50" height="20" rx="4" fill="#f1f3f5"/>
+  <text class="tag-text" x="780" y="226">归一化</text>
 
-  <!-- 卡片 2: signal.Set -->
-  <g transform="translate(540, 140)" filter="url(#card-shadow)">
-    <rect width="200" height="260" rx="12" fill="#e7f5ff" stroke="#1971c2" stroke-width="2"/>
-    <text class="card-title" x="100" y="35" text-anchor="middle" fill="#1971c2">② signal.Set</text>
-    <text class="card-sub" x="100" y="55" text-anchor="middle">internal/signal</text>
-    <line x1="20" y1="70" x2="180" y2="70" stroke="#a5d8ff" stroke-width="1.5" stroke-dasharray="4,4"/>
-    <g class="card-body" transform="translate(18, 98)">
-      <text y="0">• 标准信号字典 (40+ 项)</text>
-      <text y="28">• 统一归一化 [0, 1]</text>
-      <text y="56">• deadzone / gamma 整形</text>
-      <text y="84">• slew rate 升降限速</text>
-      <text y="112">• signal_ttl 超时失效</text>
+  <!-- 卡片 3: ② signal.Set -->
+  <g transform="translate(810, 130)" filter="url(#shadow)">
+    <rect width="320" height="220" rx="14" fill="#e7f5ff" stroke="#1971c2" stroke-width="2"/>
+    <text class="card-title" x="160" y="36" text-anchor="middle" fill="#1971c2">② signal.Set 信号集</text>
+    <text class="card-sub" x="160" y="56" text-anchor="middle">internal/signal</text>
+    <line x1="25" y1="72" x2="295" y2="72" stroke="#a5d8ff" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• 40+ 标准信号字典（统一归一至 0~1）</text>
+      <text y="28">• deadzone 死区与 gamma 非线性滤波</text>
+      <text y="56">• slew rate 升降速率平滑限制</text>
+      <text y="84">• signal_ttl 超时自动失效防锁死</text>
     </g>
   </g>
 
-  <!-- 连线 2 -> 3 -->
-  <line x1="740" y1="270" x2="794" y2="270" stroke="#495057" stroke-width="2" marker-end="url(#arrow-gray)"/>
-  <text class="flow-tag" x="767" y="258">标准信号</text>
+  <!-- 第一行到第二行折返连线 -->
+  <path d="M 970 350 L 970 395" fill="none" stroke="#495057" stroke-width="2.5" marker-end="url(#arrow-gray)"/>
+  <rect x="980" y="362" width="80" height="22" rx="4" fill="#e7f5ff" stroke="#a5d8ff"/>
+  <text class="tag-text" x="1020" y="377" fill="#1971c2">标准信号流</text>
 
-  <!-- 卡片 3: rules 规则引擎 -->
-  <g transform="translate(800, 140)" filter="url(#card-shadow)">
-    <rect width="210" height="260" rx="12" fill="#f3f0ff" stroke="#7048e8" stroke-width="2"/>
-    <text class="card-title" x="105" y="35" text-anchor="middle" fill="#7048e8">③ rules 规则引擎</text>
-    <text class="card-sub" x="105" y="55" text-anchor="middle">internal/rules</text>
-    <line x1="20" y1="70" x2="190" y2="70" stroke="#d0bfff" stroke-width="1.5" stroke-dasharray="4,4"/>
-    <g class="card-body" transform="translate(18, 98)">
-      <text y="0">• Expr 字节码实时求值</text>
-      <text y="28">• 边沿检测 (pressed/held)</text>
-      <text y="56">• priority 优先级裁决</text>
-      <text y="84">• 脉冲锁存 (hold 保持)</text>
-      <text y="112">• 平滑释放 (release 衰减)</text>
+  <!-- ================= 第二行流水线 (从右到左) ================= -->
+
+  <!-- 卡片 4: ③ rules 规则引擎 -->
+  <g transform="translate(810, 400)" filter="url(#shadow)">
+    <rect width="320" height="220" rx="14" fill="#f3f0ff" stroke="#7048e8" stroke-width="2"/>
+    <text class="card-title" x="160" y="36" text-anchor="middle" fill="#7048e8">③ rules 规则引擎</text>
+    <text class="card-sub" x="160" y="56" text-anchor="middle">internal/rules</text>
+    <line x1="25" y1="72" x2="295" y2="72" stroke="#d0bfff" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• Expr 表达式实时求值 (when 条件)</text>
+      <text y="28">• 边沿按压判定 (pressed / released)</text>
+      <text y="56">• priority 优先级整组覆盖仲裁</text>
+      <text y="84">• 脉冲锁存 (hold) 与 平滑衰减 (release)</text>
     </g>
   </g>
 
-  <!-- 连线 3 -> 4 -->
-  <line x1="1010" y1="270" x2="1064" y2="270" stroke="#495057" stroke-width="2" marker-end="url(#arrow-gray)"/>
-  <text class="flow-tag" x="1037" y="258">效果输出</text>
+  <!-- 箭头 4 -> 5 (向左) -->
+  <line x1="810" y1="510" x2="760" y2="510" stroke="#495057" stroke-width="2.2" marker-end="url(#arrow-gray)"/>
+  <rect x="765" y="482" width="50" height="20" rx="4" fill="#f1f3f5"/>
+  <text class="tag-text" x="790" y="496">效果指令</text>
 
-  <!-- 卡片 4: sink 固定时钟 -->
-  <g transform="translate(1070, 140)" filter="url(#card-shadow)">
-    <rect width="200" height="260" rx="12" fill="#fff4e6" stroke="#e8590c" stroke-width="2"/>
-    <text class="card-title" x="100" y="35" text-anchor="middle" fill="#e8590c">④ sink 输出时钟</text>
-    <text class="card-sub" x="100" y="55" text-anchor="middle">internal/sink</text>
-    <line x1="20" y1="70" x2="180" y2="70" stroke="#ffc078" stroke-width="1.5" stroke-dasharray="4,4"/>
-    <g class="card-body" transform="translate(18, 98)">
-      <text y="0">• 125 ~ 250 Hz Tick 驱动</text>
-      <text y="28">• 组装 DualSense HID 报告</text>
-      <text y="56">• 扳机 11B 效果与参数</text>
-      <text y="84">• 马达正弦/方波调幅</text>
-      <text y="112">• 设备热插拔 / 退出安全重置</text>
+  <!-- 卡片 5: ④ sink 输出时钟 -->
+  <g transform="translate(430, 400)" filter="url(#shadow)">
+    <rect width="320" height="220" rx="14" fill="#fff4e6" stroke="#e8590c" stroke-width="2"/>
+    <text class="card-title" x="160" y="36" text-anchor="middle" fill="#e8590c">④ sink 输出时钟</text>
+    <text class="card-sub" x="160" y="56" text-anchor="middle">internal/sink</text>
+    <line x1="25" y1="72" x2="295" y2="72" stroke="#ffc078" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• 125 ~ 250 Hz 固定时钟 Tick 循环</text>
+      <text y="28">• 组装 DualSense HID 硬件输出报告</text>
+      <text y="56">• 11 字节扳机模式映射 (8 种手感模式)</text>
+      <text y="84">• 设备热插拔管理与退出零阻力复位</text>
     </g>
   </g>
 
-  <!-- 连线 4 -> 5 -->
-  <line x1="1270" y1="270" x2="1324" y2="270" stroke="#495057" stroke-width="2" marker-end="url(#arrow-gray)"/>
-  <text class="flow-tag" x="1297" y="258">HID 报告</text>
+  <!-- 箭头 5 -> 6 (向左) -->
+  <line x1="430" y1="510" x2="380" y2="510" stroke="#495057" stroke-width="2.2" marker-end="url(#arrow-gray)"/>
+  <rect x="385" y="482" width="50" height="20" rx="4" fill="#f1f3f5"/>
+  <text class="tag-text" x="410" y="496">HID 报告</text>
 
-  <!-- 卡片 5: DualSense 硬件 -->
-  <g transform="translate(1330, 140)" filter="url(#card-shadow)">
-    <rect width="180" height="260" rx="12" fill="#f1f3f5" stroke="#343a40" stroke-width="2"/>
-    <text class="card-title" x="90" y="35" text-anchor="middle" fill="#212529">DualSense</text>
-    <text class="card-sub" x="90" y="55" text-anchor="middle">PS5 Controller</text>
-    <line x1="20" y1="70" x2="160" y2="70" stroke="#ced4da" stroke-width="1.5" stroke-dasharray="4,4"/>
-    <g class="card-body" transform="translate(18, 98)">
-      <text y="0">• 自适应扳机 (L2 / R2)</text>
-      <text y="28">• 左右触觉震动马达</text>
-      <text y="56">• RGB 状态指示灯条</text>
-      <text y="84">• Linux /dev/hidraw</text>
-      <text y="112">• Windows Win32 HID</text>
+  <!-- 卡片 6: DualSense 控制器 -->
+  <g transform="translate(50, 400)" filter="url(#shadow)">
+    <rect width="320" height="220" rx="14" fill="#f1f3f5" stroke="#343a40" stroke-width="2"/>
+    <text class="card-title" x="160" y="36" text-anchor="middle" fill="#212529">DualSense 控制器</text>
+    <text class="card-sub" x="160" y="56" text-anchor="middle">PS5 Physical Hardware</text>
+    <line x1="25" y1="72" x2="295" y2="72" stroke="#ced4da" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• 自适应扳机阻尼 (L2/R2 挡墙与震颤)</text>
+      <text y="28">• 左右触觉震动马达 (Haptic / Rumble)</text>
+      <text y="56">• RGB 运行状态指示灯 (Lightbar)</text>
+      <text y="84">• Linux /dev/hidraw 与 Windows HID 接口</text>
     </g>
   </g>
 
-  <!-- ================= 底部配置驱动区 ================= -->
+  <!-- ================= 第三行: 声明式配置中心 ================= -->
 
-  <g transform="translate(380, 470)" filter="url(#accent-shadow)">
-    <rect width="760" height="150" rx="14" fill="#fff5f5" stroke="#e03131" stroke-width="2"/>
-    <text class="card-title" x="380" y="32" text-anchor="middle" fill="#c92a2a" font-size="17">profiles/*.yaml（声明式游戏配置）</text>
-    <text class="card-sub" x="380" y="52" text-anchor="middle">解耦游戏特性与手柄硬件控制，支持热拔插切换与离线校验</text>
-    <line x1="30" y1="64" x2="730" y2="64" stroke="#ffc9c9" stroke-width="1.5" stroke-dasharray="4,4"/>
+  <g transform="translate(50, 660)" filter="url(#red-shadow)">
+    <rect width="1080" height="190" rx="16" fill="#fff5f5" stroke="#e03131" stroke-width="2.5"/>
+    <text class="card-title" x="540" y="36" text-anchor="middle" fill="#c92a2a" font-size="22">⚙️ profiles/*.yaml（声明式游戏配置中心）</text>
+    <text class="card-sub" x="540" y="58" text-anchor="middle" font-size="14">游戏差异与控制策略完全由 YAML 定义，零代码修改；支持启动期静态校验与热加载</text>
+    <line x1="30" y1="74" x2="1050" y2="74" stroke="#ffc9c9" stroke-width="1.5" stroke-dasharray="4,4"/>
     
-    <g class="card-body" transform="translate(30, 84)">
-      <text y="0">• <tspan font-weight="700">source 块</tspan>：声明输入源类型 (trigger / udp / sim)、监听端口、解码器 (forza / outgauge / dirt) 与字段动态偏移</text>
-      <text y="24">• <tspan font-weight="700">shape 块</tspan>：设定油门/刹车/方向盘的死区 (deadzone)、非线性响应 (gamma) 以及升降变化率 (slew rate)</text>
-      <text y="48">• <tspan font-weight="700">rules 块</tspan>：声明触发条件 when (Expr 表达式)、目标部件、扳机模式 (rigid / feedback / weapon) 与优先级 priority</text>
+    <g class="card-item" transform="translate(35, 104)" font-size="15">
+      <text y="0">• <tspan font-weight="700">source 块</tspan>：声明输入源类型 (trigger / udp / sim)、监听端口、内置解码器 (forza / outgauge / dirt) 与动态字段偏移</text>
+      <text y="28">• <tspan font-weight="700">shape 块</tspan>：配置各物理信号的死区 (deadzone)、非线性响应曲线 (gamma) 以及上升/下降平滑速率 (slew rate)</text>
+      <text y="56">• <tspan font-weight="700">rules 块</tspan>：声明触发条件 when (Expr 表达式)、目标部件、扳机模式 (rigid / feedback / weapon) 与优先级 priority</text>
     </g>
   </g>
 
-  <!-- 配置流向上连接线 -->
-  <!-- 箭头 1: 注入 Source -->
-  <path d="M 540 470 L 540 435 Q 540 420 515 415 L 430 404" fill="none" stroke="#e03131" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrow-red)"/>
-  <rect x="420" y="435" width="130" height="22" rx="4" fill="#ffe3e3" stroke="#ffa8a8" stroke-width="1"/>
-  <text class="cfg-tag" x="485" y="450">① 注入数据源规格</text>
+  <!-- 配置中心向上连线 1 (至 Source) -->
+  <path d="M 590 660 L 590 358" fill="none" stroke="#e03131" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrow-red)"/>
+  <rect x="525" y="362" width="130" height="22" rx="4" fill="#ffe3e3" stroke="#ffa8a8"/>
+  <text class="cfg-text" x="590" y="377">① 注入数据源规格</text>
 
-  <!-- 箭头 2: 注入 Rules -->
-  <path d="M 980 470 L 980 404" fill="none" stroke="#e03131" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrow-red)"/>
-  <rect x="915" y="425" width="130" height="22" rx="4" fill="#ffe3e3" stroke="#ffa8a8" stroke-width="1"/>
-  <text class="cfg-tag" x="980" y="440">② 注入规则与手感</text>
+  <!-- 配置中心向上连线 2 (至 Rules) -->
+  <path d="M 970 660 L 970 628" fill="none" stroke="#e03131" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrow-red)"/>
+  <rect x="905" y="632" width="130" height="22" rx="4" fill="#ffe3e3" stroke="#ffa8a8"/>
+  <text class="cfg-text" x="970" y="647">② 注入规则与手感</text>
 
 </svg>

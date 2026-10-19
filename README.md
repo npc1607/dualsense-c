@@ -38,6 +38,7 @@
 - [目录结构](#目录结构)
 - [协议参考](#协议参考)
 - [开发计划](#开发计划)
+  - [Windows 适配缺口](#windows-适配缺口)
 - [发行包组件说明](#发行包组件说明)
 - [许可证](#许可证)
 
@@ -606,7 +607,40 @@ profiles/                 用户自定义 Profile 目录
 - [ ] **iRacing 支持**：接入 iRacing 内存映射 SDK
 - [ ] **触控板多指手势识别**：支持双指滑动、捏合映射为虚拟轮盘/旋钮
 - [ ] **焦点窗口仲裁**：依据前台活跃窗口自动平滑切换 Profile
-- [ ] **遥测录制与回放（`ds5d replay`）**：支持测试数据录制，用于回归调试
+- [ ] **遥测录制与回放（`ds5d replay`）**：支持数据录制，用于回归调试
+
+### Windows 适配缺口
+
+代码层面已经跨平台的部分：HID 设备读写（`internal/device/hidraw_windows.go`）、
+输出报告构建、规则引擎、Profile、`trigger` / `udp` / `audio_ai`（UDP）数据源、
+`ds5bridge.exe`（本身就是 Windows 程序）。下表是**尚未适配**的部分：
+
+| 功能 | 现状 | 阻塞点 | 需要的改动 |
+|---|---|---|---|
+| **音频采集**（`source/audio`） | ❌ 仅 Linux | 依赖 `parec` 读 PipeWire monitor | WASAPI loopback 采集工具，或把 `command` 换成 ffmpeg + 虚拟声卡 |
+| **音圈输出**（`sink/haptics`） | ❌ 仅 Linux | 依赖 `pacat` 往 4 声道 sink 写 PCM | 向 DS5 的 4 声道 WASAPI 端点写 PCM 的小工具 |
+| **音圈直通**（`haptics.mode: passthrough`） | ❌ 仅 Linux | 采集与输出双依赖（同上） | 同上两项落地后自动可用 |
+| **AI 推理引擎**（`-tags onnx`） | ⚠️ 代码平台无关，构建未适配 | cgo 需要 mingw-w64 + `onnxruntime.dll`；`engine_onnx.go` 里 include 路径写死 | cgo flags 可配置化 + `build-windows-onnx` 目标 + CI 交叉编译 |
+| **虚拟手柄**（`internal/vpad`） | ❌ Windows 返回 `ErrUnsupported` | 需要虚拟总线驱动 | 接入 ViGEmBus（其 rumble 回调比 uinput 更完整） |
+| **力反馈镜像**（`source/ffb`） | ❌ 依赖虚拟手柄 | 同上一行 | 随 `vpad` 一起落地 |
+| **一键启停脚本**（`scripts/ds5-acr.sh`） | ❌ bash/Unix | — | PowerShell 版本 |
+| **调试工具** `ffclient` / `hidprobe` | ❌ 仅 Linux | 依赖 evdev FF / hidraw ioctl | Windows 对应实现（HID API 已具备） |
+| **udev 规则** | — 不需要 | Windows 无 udev | 无需适配 |
+| **Valve 手柄音频延迟参数** | — 不需要 | `--latency-msec` 是 PipeWire 工具参数 | 换 WASAPI 后用其 period 参数 |
+
+> **零改动的兜底方案**：Windows 上可让探测器作为独立进程，通过 UDP 把
+> `surface_*` / `audio_*` 发给 `ds5d.exe`（`source/audio_ai` 线协议平台无关），
+> 不必把模型与音频采集塞进主进程。
+
+---
+
+### Windows 适配路线
+
+- [ ] **P1** `internal/vpad` Windows 后端（ViGEmBus）：虚拟手柄 + FF 回调
+- [ ] **P1** 音圈输出 Windows 工具（4 声道 WASAPI 写入）
+- [ ] **P2** 音频采集 Windows 工具（WASAPI loopback → f32le stdout）
+- [ ] **P2** `engine_onnx.go` 的 cgo 路径可配置 + `build-windows-onnx`
+- [ ] **P3** `scripts/ds5-acr.ps1` 与 Windows 版调试工具
 
 ---
 

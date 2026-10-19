@@ -6,6 +6,9 @@
 ## Unreleased
 
 ### 文档
+- README 新增「Windows 适配缺口」与「Windows 适配路线」：逐项列出未适配功能
+  （音频采集/音圈输出/直通/AI 引擎构建/虚拟手柄/力反馈/脚本/调试工具）及阻塞点
+
 - 新增 `docs/audio-ai-haptics.md`：音频 AI 的接入步骤、推理流程（生命周期/窗口/
   类别映射）、HD 触感的三条触发通路、信号与参数、标定方法、延迟预算、调优速查
 - 新增流程图 `docs/audio-ai-flow.svg`（推理管线）与 `docs/audio-ai-hd.svg`

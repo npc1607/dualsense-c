@@ -58,9 +58,9 @@ haptics:
   mode: passthrough          # 关键：音圈重放真实音频，而不是合成载波
   target: auto
   source: auto               # 采集默认输出的 monitor
-  low_hz: 25                 # 音圈通带下限（更低更"沉"，但容易过头）
+  low_hz: 55                 # 再抬高：彻底避开脚步/引擎的低频区
   high_hz: 200               # 上限（碎石/金属的"脆"在这里）
-  gain: 1.6                  # 通带幅度放大（游戏低频本身很小）
+  gain: 0.7                  # 通带放大（0.85 仍嫌强，继续降）
 
 safety:
   signal_ttl: 500ms
@@ -68,124 +68,82 @@ safety:
   status_lightbar: false
 
 rules:
-  # ======================================================================
-  # 基础 HD 纹理：任何时候都把游戏低频的很小一部分送进音圈。
-  # 没有它时，只有 AI 认出材质才会有触感，其余时间是"死"的；
-  # 有了它，脚步、引擎、环境声会一直有细腻的底噪式反馈。
-  # ======================================================================
-  - name: hd-baseline-left
-    target: haptic_left
-    priority: 1
-    value: "45"
-
-  - name: hd-baseline-right
-    target: haptic_right
-    priority: 1
-    value: "45"
-
+  # 走路持续震的两个来源都已移除：
+  #   1. 常驻底纹（试过 45 / 18，脚步能量正好在音圈通带里）
+  #   2. 四条材质音圈规则（AI 把走路声认成材质时会一直给增益）
+  # 现在音圈只在**事件**（开枪/命中/爆炸）瞬间出力，平时完全静默。
   # ======================================================================
   # 材质 → 音圈增益（纹理来自音频本身，这里只决定"送多少、送哪侧"）
   # ======================================================================
-  - name: water-coil
-    when: 'has("surface_water") && surface_water > 0.20 && surface_water >= surface_metal && surface_water >= surface_wood && surface_water >= surface_gravel'
-    target: haptic_right
-    priority: 20
-    value: "clamp(120 + 380 * surface_water, 0, 200)"
-
-  - name: metal-coil
-    when: 'has("surface_metal") && surface_metal > 0.20 && surface_metal >= surface_water && surface_metal >= surface_wood && surface_metal >= surface_gravel'
-    target: haptic_right
-    priority: 20
-    value: "clamp(140 + 450 * surface_metal, 0, 235)"
-
-  - name: wood-coil
-    when: 'has("surface_wood") && surface_wood > 0.20 && surface_wood >= surface_water && surface_wood >= surface_metal && surface_wood >= surface_gravel'
-    target: haptic_left
-    priority: 20
-    value: "clamp(130 + 420 * surface_wood, 0, 220)"
-
-  - name: gravel-coil
-    when: 'has("surface_gravel") && surface_gravel > 0.20 && surface_gravel >= surface_water && surface_gravel >= surface_metal && surface_gravel >= surface_wood'
-    target: haptic_left
-    priority: 20
-    value: "clamp(150 + 420 * surface_gravel, 0, 235)"
-
-  - name: gravel-motor
-    when: 'has("surface_gravel") && surface_gravel > 0.35'
-    target: rumble_left
-    priority: 15
-    value: "clamp(240 * surface_gravel, 0, 130)"
-    modulate: { type: square, hz: 30, depth: 0.7 }
-
   # ======================================================================
   # 瞬态（开枪、命中、爆炸的起音）：两路一起给，几十毫秒内到手
   # ======================================================================
   - name: transient-coil
-    when: 'has("onset") && onset > 0.25'
+    when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
     target: haptic_right
     priority: 45
-    hold: 110ms
+    hold: 85ms
     value: "255"
 
   - name: transient-coil-l
-    when: 'has("onset") && onset > 0.25'
+    when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
     target: haptic_left
     priority: 45
-    hold: 110ms
+    hold: 85ms
     value: "245"
 
   - name: transient-motor
-    when: 'has("onset") && onset > 0.25'
+    when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
     target: rumble_right
     priority: 45
-    hold: 110ms
+    hold: 85ms
     value: "clamp(500 * onset + 120, 140, 250)"
     modulate: { type: square, hz: 26, depth: 0.5 }
 
   - name: transient-body
-    when: 'has("onset") && onset > 0.25'
+    when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
     target: rumble_left
     priority: 45
-    hold: 110ms
+    hold: 85ms
     value: "clamp(420 * onset + 100, 120, 240)"
 
   # ======================================================================
   # AI 确认的事件（比包络更准，晚 100~200ms，用来加强）
   # ======================================================================
   - name: gunshot-coil
-    when: 'has("audio_gunshot") && audio_gunshot > 0.15'
+    when: 'crossed("audio_gunshot", 0.30) && r2 < 0.80'
     target: haptic_right
     priority: 55
-    hold: 140ms
+    hold: 90ms
     value: "255"
 
   - name: gunshot-motor
-    when: 'has("audio_gunshot") && audio_gunshot > 0.15'
+    when: 'crossed("audio_gunshot", 0.30) && r2 < 0.80'
     target: rumble_right
     priority: 55
-    hold: 140ms
+    hold: 90ms
     value: "245"
     modulate: { type: square, hz: 24, depth: 0.45 }
 
   - name: gunshot-body
-    when: 'has("audio_gunshot") && audio_gunshot > 0.15'
+    when: 'crossed("audio_gunshot", 0.30) && r2 < 0.80'
     target: rumble_left
     priority: 55
-    hold: 130ms
+    hold: 90ms
     value: "230"
 
   - name: explosion-coil
-    when: 'has("audio_explosion") && audio_explosion > 0.15'
+    when: 'crossed("audio_explosion", 0.30)'
     target: haptic_left
     priority: 65
-    hold: 300ms
+    hold: 180ms
     value: "255"
 
   - name: explosion-motor
-    when: 'has("audio_explosion") && audio_explosion > 0.15'
+    when: 'crossed("audio_explosion", 0.30)'
     target: rumble_left
     priority: 65
-    hold: 300ms
+    hold: 180ms
     value: "255"
     modulate: { type: sine, hz: 22, depth: 0.6 }
 
@@ -248,19 +206,29 @@ rules:
     priority: 30
 
   # 按住不放时的连发节奏（扳机位置判定，不依赖音频）
+  # 按住期间只留这一条节奏（14Hz ≈ 840 发/分），不再叠加瞬态与 AI 两路，
+  # 否则三种频率互相打架，加特林会显得"抖得没规律"。
   - name: auto-fire-motor
     when: "r2 > 0.80"
     target: rumble_right
-    priority: 35
-    hold: 70ms
-    value: "215"
-    modulate: { type: square, hz: 11, depth: 0.85 }
+    priority: 48
+    hold: 80ms
+    value: "220"
+    modulate: { type: square, hz: 14, depth: 0.92 }
+
+  - name: auto-fire-motor-l
+    when: "r2 > 0.80"
+    target: rumble_left
+    priority: 48
+    hold: 80ms
+    value: "205"
+    modulate: { type: square, hz: 14, depth: 0.85 }
 
   - name: auto-fire-coil
     when: "r2 > 0.80"
     target: haptic_right
-    priority: 35
-    hold: 70ms
+    priority: 48
+    hold: 80ms
     value: "250"
 
   # ======================================================================

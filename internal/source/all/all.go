@@ -15,4 +15,7 @@ import (
 
 	// force feedback captured by a virtual gamepad (ds5vpad)
 	_ "github.com/npc1607/dualsense-c/internal/source/ffb"
+
+	// several sources at once (e.g. trigger + audio for shooters)
+	_ "github.com/npc1607/dualsense-c/internal/source/combo"
 )

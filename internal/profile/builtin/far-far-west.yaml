@@ -1,0 +1,232 @@
+# Far Far West（遥遥西土）—— 射击游戏
+#
+# 游戏本身适配了 DualSense，但没有特殊震动/自适应扳机。这个 profile 用两条
+# 输入源补齐（combo）：
+#
+#   trigger 源 → 控制器自身的 L2/R2 行程 → 瞄准挡墙、扳机张力、开火后坐力
+#   audio 源   → 系统输出的低频/中频包络 → 枪声、爆炸的触感
+#
+# 不需要任何游戏遥测，也不需要桥接；Steam Input 保持开启即可。
+#
+# 用法：
+#   ./bin/ds5d -profile far-far-west -rate 125
+#
+# 调参入口：
+#   - 枪声太麻/太响   → 调低 shot-coil 的 2.0 倍率，或 audio.gain
+#   - 听不到枪声触感  → 调低 shot-coil 的 mid > 0.18 门槛
+#   - 后坐力不够      → 加 recoil-* 的 value，或延长 hold
+name: far-far-west
+title: Far Far West（射击：自适应扳机 + 枪声触感）
+description: |
+  L2 半按形成瞄准挡墙，R2 渐进阻力 + 触底后坐力；
+  音频包络把枪声/爆炸变成音圈与马达的触感，弥补游戏本身没有的特殊震动。
+
+source:
+  type: combo
+  parts:
+    # 手柄自身输入（任何游戏都可用）
+    - type: trigger
+      rate_hz: 125
+
+    # 系统音频包络（抓默认输出的 monitor）
+    - type: audio
+      target: auto
+      rate_hz: 60
+      gain: 9.0             # 实测本作音频比测试音小约 5 倍，需要更高增益
+      release_ms: 70        # 比音乐触感更短，让枪声更"脆"
+      bass_hz: "25,140"     # 爆炸 / 低频轰鸣
+      mid_hz: "160,600"     # 枪声 / 弹壳 / 金属
+
+haptics:
+  target: auto
+  carrier_hz: 52            # 低频更有"实体感"（70Hz 偏轻）
+  gain: 0.95                # PCM 幅度拉满，音圈才够重
+
+safety:
+  signal_ttl: 300ms
+  release: 150ms
+  status_lightbar: false
+
+rules:
+  # ======================================================================
+  # COD 风格的扳机挡墙
+  #
+  # start / end 是行程分区（0..9，每格约 11%），不是百分比。
+  # 手感 = 前段 slope_feedback 渐进 + 后段 rigid 硬墙 + 触底泄压。
+  # ======================================================================
+
+  # ---- L2 瞄准：拉到 ~44% 遇到挡墙，加力突破才到底 ----------------------
+  - name: l2-pull
+    when: "l2 > 0.02 && l2 < 0.44"
+    target: l2
+    effect: slope_feedback
+    priority: 10
+    params:
+      start: "0"
+      end: "4"
+      start_force: "35"
+      end_force: "150"
+
+  - name: l2-wall
+    when: "l2 >= 0.44"
+    target: l2
+    effect: rigid
+    priority: 20
+    params:
+      start: "4"
+      force: "235"
+
+  # ---- R2 开火：前段轻，~67% 硬墙（枪机），突破到底击发 ------------------
+  - name: r2-pull
+    when: "r2 > 0.02 && r2 < 0.67"
+    target: r2
+    effect: slope_feedback
+    priority: 10
+    params:
+      start: "0"
+      end: "6"
+      start_force: "45"
+      end_force: "170"
+
+  - name: r2-wall
+    when: "r2 >= 0.67 && r2 < 0.97"
+    target: r2
+    effect: rigid
+    priority: 20
+    params:
+      start: "6"
+      force: "255"
+
+  # 扣到底：泄压，同时这里是开火的边沿（r2_full）
+  - name: r2-fired
+    when: "r2 >= 0.97"
+    target: r2
+    effect: off
+    priority: 30
+
+  # ---- 开火瞬间：马达 + 音圈 ---------------------------------------------
+  - name: recoil-right
+    when: 'pressed("r2_full")'
+    target: rumble_right
+    priority: 50
+    hold: 90ms
+    value: "235"
+    modulate: { type: square, hz: 26, depth: 0.5 }
+
+  - name: recoil-left
+    when: 'pressed("r2_full")'
+    target: rumble_left
+    priority: 55
+    hold: 90ms
+    value: "240"
+    modulate: { type: square, hz: 18, depth: 0.35 }
+
+  # 每次枪声也给左手柄一记短促的重击（大电机的"咚"）
+  - name: shot-left
+    when: 'has("mid") && mid > 0.12'
+    target: rumble_left
+    priority: 35
+    hold: 70ms
+    value: "clamp(200 + 400 * (mid - 0.12), 0, 245)"
+    modulate: { type: square, hz: 22, depth: 0.4 }
+
+  - name: recoil-coil-left
+    when: 'pressed("r2_full")'
+    target: haptic_left
+    priority: 50
+    hold: 130ms
+    value: "255"
+
+  - name: recoil-coil-right
+    when: 'pressed("r2_full")'
+    target: haptic_right
+    priority: 50
+    hold: 130ms
+    value: "255"
+
+  # 实测（gain 9.0）：本作枪声几乎没有 160~450Hz 能量，mid 最大只有 0.041，
+  # 能量集中在低频 —— 所以下面全部用 loudness / bass 驱动，不再用 mid。
+  #   巡航 loudness≈0.05  开枪/爆炸 0.15~0.25   bass 最大 0.22
+
+  # ---- 环境：明显有环境声时才给一点点纹理 --------------------------------
+  - name: ambient-coil
+    when: 'has("loudness") && loudness > 0.16'
+    target: haptic_right
+    priority: 5
+    value: "clamp(260 * (loudness - 0.16), 0, 85)"
+
+  # ---- 枪声：宽带能量 → 音圈 -------------------------------------------
+  - name: shot-coil
+    when: 'has("loudness") && loudness > 0.06'
+    target: haptic_right
+    priority: 20
+    value: "clamp(2200 * (loudness - 0.06), 0, 255)"
+
+  - name: shot-rumble
+    when: 'has("loudness") && loudness > 0.12'
+    target: rumble_right
+    priority: 15
+    hold: 50ms
+    value: "clamp(1200 * (loudness - 0.12), 0, 200)"
+    modulate: { type: square, hz: 30, depth: 0.6 }
+
+  # ---- 每枪一记左手重击（大电机），用低频能量驱动 ------------------------
+  - name: shot-left
+    when: 'has("bass") && bass > 0.10'
+    target: rumble_left
+    priority: 35
+    hold: 70ms
+    value: "clamp(240 + 600 * (bass - 0.10), 0, 255)"
+    modulate: { type: square, hz: 22, depth: 0.4 }
+
+  # ---- 爆炸 / 重低音 -----------------------------------------------------
+  - name: boom-rumble
+    when: 'has("bass") && bass > 0.18'
+    target: rumble_left
+    priority: 25
+    hold: 90ms
+    value: "clamp(420 * (bass - 0.18), 0, 220)"
+    modulate: { type: sine, hz: 28, depth: 0.5 }
+
+  - name: boom-coil
+    when: 'has("bass") && bass > 0.18'
+    target: haptic_left
+    priority: 25
+    value: "clamp(700 * (bass - 0.18), 0, 255)"
+
+  # ---- 按住不放：连发后坐力（全自动武器） --------------------------------
+  # pressed() 只在触底那一帧触发一次；按住时需要按射速重复，用 11Hz 方波模拟。
+  # 全自动武器：按住期间持续后坐力。
+  #
+  # 只看扳机位置，不再叠加音频门槛 —— 实测本作 gunfire 的 mid 峰值 0.041，
+  # 任何 mid 门槛都会让规则在第二枪之后断掉（"只震一次"就是这么来的）。
+  - name: auto-recoil-right
+    when: 'r2 > 0.75'
+    target: rumble_right
+    priority: 45
+    hold: 70ms
+    value: "215"
+    modulate: { type: square, hz: 11, depth: 0.9 }
+
+  - name: auto-recoil-left
+    when: 'r2 > 0.75'
+    target: rumble_left
+    priority: 45
+    hold: 70ms
+    value: "235"
+    modulate: { type: square, hz: 11, depth: 0.8 }
+
+  - name: auto-recoil-coil
+    when: 'r2 > 0.75'
+    target: haptic_right
+    priority: 45
+    value: "255"
+
+  # ---- 灯条：开枪闪白、瞄准偏蓝 ------------------------------------------
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(60 + 420 * mid, 0, 255)"
+      g: "clamp(40 + 160 * r2, 0, 200)"
+      b: "clamp(220 * (1 - r2), 0, 220)"

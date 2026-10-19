@@ -335,18 +335,28 @@ func TestBuiltinAssettoCorsaRoadFeel(t *testing.T) {
 	}
 
 	kerb := map[string]float32{"speed": 80, "accel_g": 1.4}
-	apply(set, base.Add(20*time.Millisecond), kerb)
-	kf := e.Step(base.Add(21 * time.Millisecond))
-	if kf.RumbleL == 0 || kf.RumbleR == 0 {
-		t.Fatalf("kerb: rumble = %d/%d, want both non-zero", kf.RumbleL, kf.RumbleR)
-	}
 
-	impact := map[string]float32{"speed": 80, "accel_g": 4.0}
-	apply(set, base.Add(40*time.Millisecond), impact)
-	if_ := e.Step(base.Add(41 * time.Millisecond))
-	if if_.RumbleL <= kf.RumbleL || if_.RumbleR <= kf.RumbleR {
+	// Modulation is phase-dependent, so compare the maxima over a few ticks
+	// instead of a single sample (a single frame can land on a trough).
+	peak := func(kv map[string]float32, at time.Time) (uint8, uint8) {
+		var l, r uint8
+		for i := 0; i < 24; i++ {
+			apply(set, at.Add(time.Duration(i)*5*time.Millisecond), kv)
+			f := e.Step(at.Add(time.Duration(i)*5*time.Millisecond + time.Millisecond))
+			if f.RumbleL > l {
+				l = f.RumbleL
+			}
+			if f.RumbleR > r {
+				r = f.RumbleR
+			}
+		}
+		return l, r
+	}
+	kerbL, kerbR := peak(kerb, base.Add(200*time.Millisecond))
+	impactL, impactR := peak(impactOf(4.0), base.Add(400*time.Millisecond))
+	if impactL <= kerbL || impactR <= kerbR {
 		t.Errorf("impact should hit harder than kerb: kerb %d/%d -> impact %d/%d",
-			kf.RumbleL, kf.RumbleR, if_.RumbleL, if_.RumbleR)
+			kerbL, kerbR, impactL, impactR)
 	}
 
 	// Off-track dirt (tyreDirtyLevel) alone must also produce rumble.
@@ -355,4 +365,8 @@ func TestBuiltinAssettoCorsaRoadFeel(t *testing.T) {
 	if f := e.Step(base.Add(61 * time.Millisecond)); f.RumbleL == 0 || f.RumbleR == 0 {
 		t.Errorf("off-track: rumble = %d/%d, want both non-zero", f.RumbleL, f.RumbleR)
 	}
+}
+
+func impactOf(g float32) map[string]float32 {
+	return map[string]float32{"speed": 80, "accel_g": g}
 }

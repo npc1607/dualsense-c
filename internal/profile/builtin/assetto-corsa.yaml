@@ -144,7 +144,7 @@ rules:
     target: rumble_left
     priority: 28
     hold: 70ms
-    value: "clamp(170 + 150 * (absf(accel_g) - 0.35), 0, 255)"
+    value: "clamp(170 + 150 * (absf(accel_g) - 0.35), 0, 235)"
     modulate: { type: square, hz: 30, depth: 0.8 }
 
   - name: kerb-right
@@ -152,7 +152,7 @@ rules:
     target: rumble_right
     priority: 28
     hold: 70ms
-    value: "clamp(155 + 140 * (absf(accel_g) - 0.35), 0, 245)"
+    value: "clamp(155 + 140 * (absf(accel_g) - 0.35), 0, 220)"
     modulate: { type: square, hz: 44, depth: 0.8 }
 
   # ---- 路外（草地 / 砂石）：持续粗糙 -----------------------------------
@@ -180,7 +180,7 @@ rules:
     target: rumble_left
     priority: 60
     hold: 130ms
-    value: "clamp(150 + 38 * (absf(accel_g) - 1.5), 0, 255)"
+    value: "clamp(150 + 45 * (absf(accel_g) - 1.5), 0, 255)"
     modulate: { type: square, hz: 18, depth: 0.55 }
 
   - name: impact-right
@@ -188,7 +188,7 @@ rules:
     target: rumble_right
     priority: 60
     hold: 130ms
-    value: "clamp(140 + 35 * (absf(accel_g) - 1.5), 0, 255)"
+    value: "clamp(140 + 45 * (absf(accel_g) - 1.5), 0, 255)"
     modulate: { type: square, hz: 23, depth: 0.55 }
 
   # ---- 音圈：细颗粒纹理（HID 马达给体感，音圈给细节） ------------------

@@ -22,6 +22,26 @@
 - `assetto-corsa` profile 接入音圈：路肩 / 撞击 / 路面细颗粒同时驱动
   HID 马达（体感）与音圈（细节）。
 
+### 新增（Far Far West 射击 profile 与 combo 源）
+- `source/combo`：一个 profile 只能写一个 source，但射击游戏需要「手柄扳机 +
+  系统音频」两路同时输入。combo 并行跑多个子源并把帧合并
+  （`signal.Set` 按信号独立更新，互不覆盖）
+- `far-far-west` profile（AppID 3124540）：COD 风格扳机挡墙
+  （L2 44% 硬墙 235、R2 67% 硬墙 255、触底泄压）+ 单发重击 + 按住连发后坐力
+  + 枪声/爆炸的音频触感（马达与音圈并行）
+- 音圈参数按射击手感调过：载波 70→52Hz、PCM 增益 0.7→0.95、单发音圈 130ms
+
+### 修复（Far Far West 实测暴露）
+- `ds5-acr.sh` 之外新增按实测数据调参的依据：本作枪声在 160–450Hz 几乎无能量
+  （mid 峰值 0.041），任何 `mid` 门槛都会让连发规则在第二枪后失效 →
+  改用 `loudness`/`bass` 驱动音频触感，连发只按扳机位置判定
+- `hold` 语义纠正：按住时 `when` 持续为真，`hold` 只决定松手后的尾巴。
+  之前用 300ms 救连发，导致单点松手后拖尾
+- assetto-corsa：撞击必须是全场最强输出，路肩封顶降到 235/220，
+  撞击斜率提高（150+45·x / 140+45·x）
+- 测试 `TestBuiltinAssettoCorsaRoadFeel` 改为多帧取峰值比较，
+  避免调幅相位导致单帧断言抖动
+
 ### 新增
 - `source/audio`：抓 PipeWire monitor → 三段带通（`bass` 20-110Hz、`mid` 160-450Hz）
   与全带 `loudness` 的包络信号，attack/release 可配，纯 Go + CLI 子进程

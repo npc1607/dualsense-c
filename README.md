@@ -1,75 +1,80 @@
 # dualsense-c
 
-给 **PS5 DualSense (DS5)** 做一套**通用的自适应扳机 / 震动适配框架**：不是只为某一个游戏写死，而是把「信号源 → 信号 → 规则 → 手柄」拆成四层，游戏差异全部交给 YAML profile。
+**dualsense-c** 是专为 **PS5 DualSense (DS5)** 控制器设计的通用自适应扳机与力反馈驱动框架。
 
-- **射击游戏（任意）**：不依赖游戏支持，读手柄自身的扳机行程，做「瞄准挡墙 + 开火后坐力」
-- **自带遥测的游戏**：Forza 地平线 4/5（UDP 5300）、BeamNG / Live for Speed（OutGauge 4444）、尘埃拉力 / EA WRC（UDP 20777，带校准工具）
-- **只有共享内存的游戏**：Assetto Corsa / ACC / AC Rally —— 交叉编译的 `ds5bridge.exe` 在 Proton 前缀内读 `acpmf_physics`，UDP 回传给原生守护进程
-- **纯 Go、无 CGO**：Linux 直接用 `/dev/hidraw`，Windows 走 HID 设备接口（代码已就位，未在真机验证）
-- **换游戏 = 改 YAML**：偏移、映射、手感参数都在 profile 里，不需要重新编译
+架构采用「信号源（Source）→ 归一化信号（Signal）→ 规则引擎（Rules）→ 硬件输出（Sink）」四层解耦设计，硬件驱动与游戏逻辑完全分离。适配新游戏仅需编写声明式 YAML Profile，无需修改或重新编译程序。
+
+- **全游戏通用（输入驱动）**：不依赖游戏支持，读取控制器自带的 L2/R2 扳机行程与按键，实现瞄准挡墙与射击后坐力反馈。
+- **原生遥测支持**：内置支持 Forza Horizon 4/5（UDP 5300）、BeamNG / Live for Speed（OutGauge 4444），并提供 DiRT Rally / EA WRC / F1 系列的字段级动态校准能力。
+- **Proton / Wine 共享内存桥接**：针对 Assetto Corsa / ACC / AC Rally 等依赖 Windows 命名共享内存（`acpmf_physics`）的游戏，提供轻量 Windows 桥接程序 `ds5bridge.exe`，在 Proton 前缀内读取数据并回传至原生守护进程。
+- **纯 Go 实现、零 CGO 依赖**：Linux 环境原生读写 `/dev/hidraw`，Windows 环境直接调用 HID API。
+- **高确定性与容错机制**：信号超时自动降级、力反馈释放平滑衰减（防止机械突弹）、配置启动期编译校验。
 
 ```
-游戏 ──► [Source 适配器] ──► [signal.Set] ──► [rules 表达式引擎] ──► [sink 固定时钟] ──► DualSense
-         trigger / udp / sim     归一化 0..1      平滑/限速/锁存/衰减     125~250 Hz      hidraw / HID
-              ▲                                        ▲
-              └──────────── profiles/*.yaml ───────────┘
+游戏数据 ──► [Source 适配器] ──► [signal.Set] ──► [rules 表达式引擎] ──► [sink 输出时钟] ──► DualSense
+             trigger / udp / sim     归一化 [0, 1]      平滑 / 限速 / 衰减      125 ~ 250 Hz       hidraw / HID
+                  ▲                                          ▲
+                  └───────────── profiles/*.yaml ────────────┘
 ```
 
 ---
 
 ## 目录
 
-- [为什么是"框架"而不是"脚本"](#为什么是框架而不是脚本)
+- [系统架构](#系统架构)
 - [快速开始](#快速开始)
 - [游戏支持矩阵](#游戏支持矩阵)
-- [命令行](#命令行)
-- [Profile 格式](#profile-格式)
-- [效果（effect）与参数](#效果effect与参数)
-- [标准信号表](#标准信号表)
-- [校准一个没有内置支持的游戏](#校准一个没有内置支持的游戏)
-- [Windows](#windows)
+- [共享内存游戏支持（AC / ACC / AC Rally）](#共享内存游戏支持ac--acc--ac-rally)
+- [命令行工具](#命令行工具)
+- [Profile 配置规范](#profile-配置规范)
+- [扳机效果与参数](#扳机效果与参数)
+- [标准信号列表](#标准信号列表)
+- [新游戏遥测校准指南](#新游戏遥测校准指南)
+- [平台支持（Linux / Windows）](#平台支持linux--windows)
 - [故障排查](#故障排查)
 - [目录结构](#目录结构)
 - [协议参考](#协议参考)
-- [Roadmap](#roadmap)
+- [开发计划](#开发计划)
+- [发行包组件说明](#发行包组件说明)
+- [许可证](#许可证)
 
 ---
 
-## 为什么是"框架"而不是"脚本"
+## 系统架构
 
-大多数 DS5 方案把「读哪个游戏的哪块内存」和「怎么驱动扳机」写在一起，换游戏就要改代码。这里把它们彻底分开：
+传统方案通常将内存/遥测读取与底层扳机控制逻辑紧耦合，适配新游戏需要修改核心代码。本项目将其划分为四层独立流水线：
 
-| 层 | 职责 | 换游戏时要改吗 |
+| 分层 | 职责定义 | 适配新游戏时的变动 |
 |---|---|---|
-| **Source** | 把一个游戏的状态变成标准信号（`trigger` 输入驱动 / `udp` 遥测 / `sim` 模拟） | 有原生遥测 → 改 YAML；否则不用改 |
-| **signal.Set** | 统一归一化、时间戳、过期判定、deadzone/gamma/限速平滑 | 不用改 |
-| **rules** | 声明式表达式把信号映射成扳机/马达/灯条效果，支持优先级、锁存、衰减 | 只改 YAML |
-| **sink** | 固定 tick 写 HID 报告，热插拔、异常回收 | 不用改 |
+| **Source** | 接入游戏状态并转为标准化信号（`trigger` 输入驱动 / `udp` 遥测 / `sim` 虚拟模拟） | 原生 UDP 遥测调整 YAML；无新协议无需修改代码 |
+| **signal.Set** | 信号归一化、时间戳追踪、过期判定，以及死区（deadzone）与变化率限制（slew rate）处理 | 框架底层维护，无需修改 |
+| **rules** | 声明式规则引擎，通过表达式将信号映射为扳机、马达及灯条动作，支持优先级、锁存与衰减 | 仅编写/修改 Profile YAML |
+| **sink** | 固定时钟周期（125~250 Hz）组装并写入 HID 输出报告，负责设备热插拔与退出重置 | 框架底层维护，无需修改 |
 
-三个关键性质：
+### 核心设计特性
 
-1. **信号缺失不会误驱动**：规则里用 `has("brake")` 判断，信号过期（`signal_ttl`）后规则自动失效，而不是把刹车当成 0 把扳机锁死。
-2. **断流不弹手**：效果消失后按 `release` 时长把推力衰减到 0，不会"啪"一下松开。
-3. **profile 即文档**：`internal/profile/builtin/*.yaml` 就是可读的示例，也是默认配置。
+1. **状态失效安全（Fail-Safe）**：规则支持 `has("signal")` 判定。当数据流中断超出 `signal_ttl` 阈值时规则自动停用，避免将缺失信号误认为零值而锁定扳机。
+2. **平滑释放衰减**：力反馈效果失效时，按照配置的 `release` 时间平滑衰减至零，消除机械突弹手感。
+3. **配置即文档**：`internal/profile/builtin/*.yaml` 既是内嵌默认配置，也是标准的编写范例。
 
 ---
 
 ## 快速开始
 
-### 1. 依赖
+### 1. 环境要求
 
 - Go 1.24+
-- Linux（hidraw）或 Windows（HID，实验性）
-- DualSense，**建议 USB 连接**（蓝牙下自适应扳机不稳定；本仓库支持 BT 报告格式，但未在真机长时间验证）
+- Linux（支持 hidraw）或 Windows（HID 接口）
+- PS5 DualSense 控制器，**推荐使用 USB 有线连接**（蓝牙协议受带宽及传输格式限制，稳定性略低于有线）。
 
-### 2. 编译
+### 2. 编译构建
 
 ```bash
-make            # bin/ds5d  bin/ds5ctl
-make windows    # bin/ds5d.exe  bin/ds5ctl.exe（交叉编译，纯 Go）
+make            # 编译生成 bin/ds5d 与 bin/ds5ctl
+make windows    # 交叉编译生成 bin/ds5d.exe 与 bin/ds5ctl.exe（纯 Go，无需外部工具链）
 ```
 
-### 3. 授权 hidraw（Linux，一次性）
+### 3. 配置 Linux 权限（udev 规则，一次性）
 
 ```bash
 make install-udev
@@ -78,51 +83,52 @@ make install-udev
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-然后**重新插拔一次手柄**。
+安装后请**重新插拔控制器**以应用规则。
 
-### 4. 验证硬件
+### 4. 硬件自检
 
 ```bash
-./bin/ds5ctl list        # 应看到一个 usb DualSense
-./bin/ds5ctl test        # 震动渐强 → L2 阻力 → R2 阻力 → 反馈效果
-./bin/ds5ctl bench       # 逐个试 8 种扳机效果，挑手感（ctrl-c 退出）
+./bin/ds5ctl list        # 查看识别到的 DualSense 控制器
+./bin/ds5ctl test        # 硬件自检：依次测试震动、L2 阻力、R2 阻力及反馈模式
+./bin/ds5ctl bench       # 轮巡播放 8 种扳机效果用于手感对比（按 Ctrl+C 退出）
 ```
 
-没有反应时用 `-hidraw /dev/hidrawN` 指定节点逐个试。
+若存在多个控制器接口，可使用 `-hidraw /dev/hidrawN` 参数显式指定设备节点。
 
-### 5. 跑起来
+### 5. 启动运行
 
-**射击游戏（任何游戏，零配置）**
+**射击 / 动作游戏（输入驱动，全游戏免配）**
 
 ```bash
 ./bin/ds5d -profile fps
 ```
 
-L2 前 55% 行程有渐进阻力（瞄准"挡墙"），越过挡墙阻力消失；R2 到 85% 时右马达给一记后坐力脉冲。
+- L2（瞄准）：前 55% 行程提供渐进阻力（模拟机械扳机挡墙），越过阈值后阻力释放。
+- R2（开火）：行程达到 85% 时触发右马达后坐力脉冲。
 
-**有遥测的赛车游戏**
+**原生遥测竞速游戏**
 
 ```bash
-./bin/ds5d -profile forza-horizon     # Forza 地平线 4/5、Forza Motorsport
+./bin/ds5d -profile forza-horizon     # Forza Horizon 4/5、Forza Motorsport
 ./bin/ds5d -profile beamng            # BeamNG.drive、Live for Speed
 ```
 
-**只有共享内存的游戏（AC / ACC / AC Rally）**
+**共享内存竞速游戏（AC / ACC / AC Rally）**
 
 ```bash
-make bridge                                   # 交叉编译 bin/ds5bridge.exe
-./bin/ds5d -profile assetto-corsa &           # 先起守护进程
-./scripts/launch-bridge.sh 805550             # 把桥塞进该 AppID 的 Proton 前缀
-# Steam AppID：AC 244210 | ACC 805550 | AC Rally 3917090
+make bridge                                   # 编译 Windows 桥接程序 bin/ds5bridge.exe
+./bin/ds5d -profile assetto-corsa &           # 启动后台守护进程
+./scripts/launch-bridge.sh 805550             # 在指定 Steam AppID 的 Proton 前缀中启动桥接程序
+# Steam AppID 对照：AC: 244210 | ACC: 805550 | AC Rally: 3917090
 ```
 
-**不插手柄先验证配置**（profile 开发、CI 都能用）
+**配置联调模式（无需连接物理手柄）**
 
 ```bash
 ./bin/ds5d -dry-run -profile fps -source sim -trace
 ```
 
-### 6. 后台运行
+### 6. 常驻后台运行
 
 ```bash
 nohup ./bin/ds5d -profile fps >> /tmp/ds5d.log 2>&1 &
@@ -132,149 +138,155 @@ nohup ./bin/ds5d -profile fps >> /tmp/ds5d.log 2>&1 &
 
 ## 游戏支持矩阵
 
-### A. 输入驱动（不需要游戏配合，所有游戏都能用）
+### 1. 输入驱动模式（无需游戏支持，全游戏通用）
 
-| 手段 | 说明 | 状态 |
+| 数据源类型 | 工作机制 | 支持状态 |
 |---|---|---|
-| `trigger` 源 | 读手柄自身输入报告（L2/R2 行程、按键、摇杆），规则做挡墙/阻力/后坐力 | ✅ 可用 |
+| `trigger` 源 | 解析控制器自身的输入报告（L2/R2 行程、按键状态、摇杆偏移），通过规则引擎生成阻力、挡墙与震动反馈 | ✅ 生产可用 |
 
-这条路对 FPS / TPS / 动作游戏最实用：游戏不需要任何设置，也不受 Steam Input 影响（前提是 Steam 不抢写震动）。
+适用于 FPS、TPS 及各类动作游戏。不受游戏本身是否支持 DualSense 限制（需注意避免与 Steam Input 的震动控制产生抢占冲突）。
 
-### B. 游戏自带遥测端口（真实数据，手感最好）
+### 2. 原生 UDP 遥测模式
 
-| 游戏 | 端口 | 解码器 | 状态 |
+| 游戏名称 | 默认端口与格式 | 解码器 | 支持状态 |
 |---|---|---|---|
-| Forza Horizon 4 / 5，Forza Motorsport 7 / 2023 | UDP **5300**（Data Out，格式必须选 **Dash**） | `forza` | ✅ 内置 |
-| BeamNG.drive | UDP **4444**（Options → Other → OutGauge） | `outgauge` | ✅ 内置 |
-| Live for Speed | UDP **4444**（Misc → OutGauge） | `outgauge` | ✅ 内置 |
-| 尘埃拉力 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（Options → UDP Telemetry = On） | `dirt` + `fields` | ⚠️ 模板（偏移需现场校准，见下文） |
-| F1 22 / 23 / 24 | UDP 20777（格式随年份变化） | `fields` | ⚠️ 模板 |
-| Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | ✅ 内置（偏移沿用 acr-dualsense 实测值） |
-| rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | 🚧 未实现 |
-| iRacing | SDK 内存映射 | — | 🚧 未实现 |
+| Forza Horizon 4 / 5、Forza Motorsport 7 / 2023 | UDP **5300**（Data Out 模式，数据格式需设置为 **Dash**） | `forza` | ✅ 内置支持 |
+| BeamNG.drive | UDP **4444**（选项 → 其他 → 启用 OutGauge） | `outgauge` | ✅ 内置支持 |
+| Live for Speed | UDP **4444**（选项 → 外设 → OutGauge） | `outgauge` | ✅ 内置支持 |
+| DiRT Rally 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（配置 → 启用 UDP 遥测） | `dirt` + `fields` | ⚠️ 提供模板（各版本结构差异较大，需使用 `sniff` 校准） |
+| F1 22 / 23 / 24 | UDP **20777** | `fields` | ⚠️ 提供模板（按年份版本校准字段偏移） |
+| Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | ✅ 内置支持（采用实测偏移定义） |
+| rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | 🚧 规划中 |
+| iRacing | 内存映射 SDK | — | 🚧 规划中 |
 
-> 为什么尘埃 / F1 只有模板：Codemasters 的包结构在 DR1 → DR2 → DiRT 4 → EA WRC 之间改过多次，同一版本还会交替发送多种长度的包，**内置猜测的偏移只会让扳机乱抖**。所以这里给的是「3 分钟校准流程 + 声明式字段表」，而不是假装支持。
-
-### C. 完全无遥测、也无需输入驱动
-
-兜底的音频 / 震动镜像方案见 [Roadmap](#roadmap)（`source/audio`、`source/ffb`）。
+> **说明**：Codemasters 系列（DiRT / F1 / EA WRC）在跨代版本中多次变更报文结构，且同一版本可能混合传输不同长度的数据帧。硬编码偏移极易导致扳机动作异常。因此本项目采用「声明式字段配置（fields）+ 现场抓包校准（sniff）」机制，提供精准适配能力。
 
 ---
 
-## 共享内存游戏（Assetto Corsa / ACC / AC Rally）
+## 共享内存游戏支持（AC / ACC / AC Rally）
 
-这类游戏的遥测是 Windows 命名共享内存（`acpmf_physics`）：游戏进程在 Proton 前缀里写，原生 Linux 进程**看不到**。所以只有"读共享内存"这一小段必须待在前缀里，其余全部原生：
+此类游戏的物理遥测数据写入 Windows 命名共享内存（如 `acpmf_physics`）。在 Linux 环境下，Proton/Wine 进程运行在独立命名空间中，原生 Linux 进程无法直接读取该内存段。
+
+本项目通过运行在同一 Proton 前缀内的轻量 Windows 进程 `ds5bridge.exe` 提取物理数据，并通过本机的环回 UDP 发送至原生 `ds5d`：
 
 ```
-acc.exe (Proton) ──写──> acpmf_physics（Wine 共享内存）
-                              ▲
-ds5bridge.exe (Windows, 同前缀) ──读──┘ → UDP 127.0.0.1:9999
-                              ▼
-ds5d（Linux 原生）→ 规则 → DualSense
+acc.exe (Proton 进程) ──写──► acpmf_physics (Wine 共享内存)
+                                      ▲
+ds5bridge.exe (同 Proton 前缀) ──读───┘ ──► UDP 127.0.0.1:9999
+                                                    ▼
+ds5d (Linux 原生守护进程) ──► 表达式规则 ──► DualSense 控制器
 ```
+
+### 启动流程
 
 ```bash
-make bridge                                  # 只交叉编译桥，纯 Go 不需要 mingw
-./bin/ds5d -profile assetto-corsa &          # 守护进程先起，会等数据
-./scripts/launch-bridge.sh 805550            # ACC；AC=244210, AC Rally=3917090
-# 或者手动：
+make bridge                                  # 交叉编译 Windows 桥接程序
+./bin/ds5d -profile assetto-corsa &          # 启动原生守护进程（等待数据输入）
+./scripts/launch-bridge.sh 805550            # 注入 ACC（AC: 244210, AC Rally: 3917090）
+# 手动启动方式：
 protontricks-launch --appid 805550 ./bin/ds5bridge.exe -layout acc -debug
 ```
 
-桥的行为：
+### 桥接程序运行保障
 
-- 每 2 秒重试一次共享内存，**可以先于游戏启动**
-- `packetId` 超过 2 秒不变 → 认为本局结束，自动重新打开映射（不用重启桥）
-- 数值不合理时打印 `layout mismatch?` 并跳过，不会把乱数送进扳机
+- 每 2 秒轮询一次共享内存连接，**允许先于游戏启动**；
+- 若检测到 `packetId` 连续 2 秒未递增，判定当前对局已结束并自动重连，无需重启桥接进程；
+- 具备异常值校验逻辑，出现字段越界或类型不匹配时输出 `layout mismatch?` 告警并跳过异常帧，防止错误数据影响控制器。
 
-**没有游戏也想验证链路**（`tools/bridgesim` 模拟桥的输出）：
+### 无游戏环境的链路验证
+
+可运行 `tools/bridgesim` 模拟桥接数据流：
 
 ```bash
-go run ./tools/bridgesim -port 9999          # 终端 A
-./bin/ds5d -dry-run -profile assetto-corsa -trace   # 终端 B
+# 终端 A：启动模拟发送端
+go run ./tools/bridgesim -port 9999
+
+# 终端 B：验证数据链路与规则求值
+./bin/ds5d -dry-run -profile assetto-corsa -trace
 ```
 
-### 桥的线格式
+### 桥接通信协议
 
-自描述，不是定长 6 通道：
+桥接程序与守护进程之间采用自描述定长紧凑协议：
 
 ```
-0  magic   uint32  "DS5B" (0x42355344)
-4  version uint16  1
-6  count   uint8
-7  _       uint8
-8  fields[count] { id uint8, value float32 }   // id = internal/signal.Standard 的下标
+偏移  字段       类型      说明
+0     magic      uint32    协议标识 "DS5B" (0x42355344)
+4     version    uint16    版本号（当前固定为 1）
+6     count      uint8     有效数据项数量
+7     _          uint8     对齐保留位
+8     fields[]   struct    数组项：{ id uint8, value float32 }（id 对应 internal/signal.Standard 下标）
 ```
 
-新增字段只要改 `internal/bridge/layout.go`，守护进程侧无需改动。
+扩展新遥测指标仅需更新 `internal/bridge/layout.go`，无需变动主通信链路。
 
 ---
 
-## 命令行
+## 命令行工具
 
-### `ds5d` —— 守护进程
+### `ds5d`（核心守护进程）
 
-| 参数 | 默认 | 说明 |
+| 参数 | 默认值 | 说明 |
 |---|---|---|
-| `-profile` | `fps` | profile 名（内置）或 `.yaml` 路径 |
-| `-profiles` | 空 | 额外的 profile 目录 |
-| `-source` | 空 | 覆盖 profile 的 source 类型（如 `sim`、`trigger`、`udp`） |
-| `-hidraw` | 自动 | 强制设备路径 |
-| `-rate` | `125` | 每秒输出报告数（DS5 USB 最高可到 250） |
-| `-dry-run` | 关 | 不开手柄，只打印帧（可在 macOS 上开发 profile） |
-| `-trace` | 关 | 每秒两次打印信号值 |
-| `-list` | 关 | 列出内置 profile 后退出 |
-| `-version` | 关 | 打印版本（release 构建时注入 tag） |
+| `-profile` | `fps` | 指定加载的 Profile 名称（内置）或自定义 `.yaml` 绝对/相对路径 |
+| `-profiles` | 空 | 指定自定义 Profile 的扫描目录 |
+| `-source` | 空 | 覆盖 Profile 中声明的 Source 类型（如 `sim`、`trigger`、`udp`） |
+| `-hidraw` | 自动识别 | 显式指定控制器设备节点路径（如 `/dev/hidraw3`） |
+| `-rate` | `125` | HID 报告发送频率（Hz），DualSense USB 最高支持 250 Hz |
+| `-dry-run` | 禁用 | 纯逻辑仿真模式，不打开物理控制器，控制台打印输出帧 |
+| `-trace` | 禁用 | 调试开关，周期性输出当前计算的信号采样值 |
+| `-list` | 禁用 | 输出所有内置 Profile 列表后退出 |
+| `-version` | 禁用 | 打印当前版本信息后退出 |
 
-### `ds5ctl` —— 维护工具
+### `ds5ctl`（设备与配置工具）
 
-| 命令 | 说明 |
+| 子命令 | 说明 |
 |---|---|
-| `list` | 枚举手柄 |
-| `profiles [-dir d]` | 列出内置/自定义 profile |
-| `check -profile p` | **只编译规则**，不开手柄，验证 YAML 写对没有 |
-| `test` | 震动 + 扳机渐变自检 |
-| `bench [-trigger l2\|r2\|both]` | 逐个播放 8 种扳机效果 |
-| `watch` | 打印解码后的输入报告（校准按键位表） |
-| `sniff -listen :20777` | 十六进制 dump 游戏遥测包（校准 UDP 偏移） |
-| `version` | 打印版本 |
+| `list` | 枚举系统中接入的 DualSense 设备 |
+| `profiles [-dir <path>]` | 查看内置及指定目录下的可用 Profile 列表 |
+| `check -profile <path>` | 离线编译并验证 YAML 规则有效性（不连接硬件） |
+| `test` | 硬件诊断自检（依次执行震动渐变与扳机阻力测试） |
+| `bench [-trigger l2\|r2\|both]` | 逐项测试控制器支持的 8 种扳机效果模式 |
+| `watch` | 实时输出控制器上行输入报告解析结果（用于按键映射校准） |
+| `sniff -listen <addr>` | 十六进制转储指定端口接收到的 UDP 遥测数据包（用于字段逆向校准） |
+| `version` | 打印工具版本信息 |
 
 ---
 
-## Profile 格式
+## Profile 配置规范
 
 ```yaml
-name: my-game                # 必填，profile 标识
-title: 显示名称
-description: |               # 随便写，用于 self-documenting
-  ...
+name: my-game                # 必填：Profile 唯一标识
+title: 示例配置               # 显示名称
+description: |               # 详细描述信息
+  配置说明与适配版本记录
 
 source:
-  type: udp                  # trigger | udp | sim
-  listen: "0.0.0.0:5300"
-  decoder: forza             # forza | outgauge | dirt | fields | auto
-  rate_hz: 60                # 采样上限
-  # dump: true               # 每种包长 dump 一次，排查用
+  type: udp                  # 数据源类型：trigger | udp | sim
+  listen: "0.0.0.0:5300"     # 监听地址与端口
+  decoder: forza             # 数据解码器：forza | outgauge | dirt | fields | auto
+  rate_hz: 60                # 数据采样频率上限
+  # dump: true               # 启用数据包长度与内容转储（调试用）
 
-shape:                       # 可选：信号整形（在规则看到之前）
+shape:                       # 可选：信号前置处理与整形
   brake:    { deadzone: 0.02, gamma: 1.0, slew_up: 60, slew_down: 200 }
   throttle: { deadzone: 0.02, gamma: 0.9 }
 
 safety:
-  signal_ttl: 500ms          # 多久没更新算"信号消失"
-  release: 300ms             # 效果消失后的淡出时长（防弹手）
-  status_lightbar: true      # 没有任何规则控制灯条时，用绿/黄表示 收到数据/空闲
+  signal_ttl: 500ms          # 信号超时时限，超时判定为数据源离线
+  release: 300ms             # 规则失效后的力反馈衰减时长（防止扳机突弹）
+  status_lightbar: true      # 缺省状态下使用指示灯展示连接状态（绿色：就绪，黄色：等待数据）
 
-signals: [my_extra_signal]   # 可选：额外的自定义信号名
+signals: [custom_boost]      # 可选：声明自定义扩展信号名
 
 rules:
   - name: l2-brake
-    when: 'has("brake") && brake > 0.01'     # 可选；不写则一直生效
-    target: l2                               # l2 | r2 | rumble_left | rumble_right | lightbar | player_leds
-    effect: rigid                            # 见下表
-    priority: 10                             # 越大越后应用（后写覆盖先写）
-    hold: 0ms                                # 一次性脉冲的锁存时长
-    params:                                  # 每个值都是一个表达式
+    when: 'has("brake") && brake > 0.01'     # 激活条件，未定义则始终匹配
+    target: l2                               # 输出目标：l2 | r2 | rumble_left | rumble_right | lightbar | player_leds
+    effect: rigid                            # 扳机模式（见效果表）
+    priority: 10                             # 执行优先级，数值大者优先覆盖
+    hold: 0ms                                # 脉冲类信号触发后的最短保持时长
+    params:                                  # 效果参数映射表达式
       start: "0"
       force: "clamp(18 + 237 * brake, 0, 255)"
 
@@ -287,120 +299,122 @@ rules:
     modulate: { type: sine, hz: 24, depth: 0.65 }
 ```
 
-### 表达式
+### 表达式语法
 
-规则里的 `when` / `params.*` / `value` 都是表达式，由 [expr-lang](https://expr-lang.org) 编译成字节码：
+规则中的 `when` 条件、`params.*` 参数以及 `value` 字段均由 [expr-lang](https://expr-lang.org) 编译为高效字节码执行：
 
-- 变量：所有[标准信号](#标准信号表)（缺失时为 `0`）
-- 内置数学：`min` `max` `abs` `ceil` `floor` `round` `sqrt` `pow`
-- 本项目补充：
+- **变量范围**：所有[标准信号](#标准信号表)（未定义或过期时为 `0`）。
+- **内置数学函数**：`min`, `max`, `abs`, `ceil`, `floor`, `round`, `sqrt`, `pow`。
+- **扩展工具函数**：
 
-| 函数 | 说明 |
+| 函数签名 | 说明 |
 |---|---|
-| `clamp(x, lo, hi)` | 夹取 |
-| `lerp(a, b, t)` | 线性插值 |
-| `smoothstep(e0, e1, x)` | 平滑过渡（比 if 手感好） |
-| `has("sig")` | 信号当前是否新鲜（bool） |
-| `pressed("sig")` | 本帧刚越过 0.5（bool，边沿） |
-| `released("sig")` | 本帧刚跌破 0.5（bool） |
-| `held("sig")` | 当前 ≥ 0.5（bool） |
-| `sec()` | 守护进程启动以来的秒数（做周期性效果） |
+| `clamp(x, lo, hi)` | 数值区间夹取 |
+| `lerp(a, b, t)` | 线性插值计算 |
+| `smoothstep(e0, e1, x)` | 埃尔米特插值，提供平滑阶梯过渡 |
+| `has("sig")` | 检测目标信号当前是否处于有效刷新周期内（返回 bool） |
+| `pressed("sig")` | 上升沿检测：当前帧从 `< 0.5` 跃迁至 `≥ 0.5`（返回 bool） |
+| `released("sig")` | 下降沿检测：当前帧从 `≥ 0.5` 跌落至 `< 0.5`（返回 bool） |
+| `held("sig")` | 电平检测：当前值 `≥ 0.5`（返回 bool） |
+| `sec()` | 守护进程自启动以来的运行秒数（用于构造周期性时间函数） |
 
-**编译期校验**：信号名拼错、函数名拼错、类型不匹配都会在启动时报错（`ds5ctl check` 可以离线验证），不会静默失效。
+所有 Profile 在程序加载时执行编译期校验。若存在未声明变量、函数名拼写错误或类型推导异常，进程将立即终止并报错。建议使用 `ds5ctl check` 进行静态预检。
 
-### 优先级与叠加
+### 规则优先级与覆盖机制
 
-`priority` 小的先算，大的后算。同一个 target 上的后写规则会**整体覆盖**前一条（不是叠加数值），所以：
+`priority` 数值较小的规则先执行，数值较大者后执行。当多个规则作用于同一个 `target` 时，高优先级规则**整组覆盖**低优先级输出（而非数值累加）：
 
 ```yaml
   - {name: aim,  when: "l2 < 0.5", target: l2, effect: feedback, priority: 10, ...}
   - {name: off,  when: "l2 >= 0.5", target: l2, effect: off,     priority: 20}
 ```
 
-越过挡墙时高优先级规则接管，把阻力完全释放。
+当行程超过设定阈值时，优先级为 20 的规则将接管并完全释放阻力。
 
 ---
 
-## 效果（effect）与参数
+## 扳机效果与参数
 
-DS5 的每根扳机在报告里是一段 11 字节：1 字节 mode + 10 字节参数。参数语义按 `hid-playstation` / 社区文档实现，**不同固件可能略有差异**，用 `ds5ctl bench` 实测确认。
+DualSense 的每个扳机通道在 HID 报告中占用 11 字节（1 字节模式标识 + 10 字节控制参数）。各模式参数严格对应 Linux 内核 `hid-playstation` 标准：
 
-| effect | mode | 语义参数 | 手感 |
+| 模式名称 | 模式 ID | 语义参数 | 典型效果说明 |
 |---|---|---|---|
-| `off` | 0x00 | — | 松开 |
-| `rigid` | 0x01 | `start`(0..9) `force`(0..255) | 从起点开始的持续阻力 |
-| `section` / `pulse` | 0x02 | `start` `end` | 只在行程区间内有阻力 |
-| `feedback` | 0x21 | `start` `strength` `force` | 阻力随行程变化（瞄准挡墙首选） |
-| `weapon` | 0x22 | `start` `amp_a` `amp_b` `freq` | 两段式扳机（枪械扳机断点） |
-| `vibration` | 0x23 | `start` `amplitude` `freq` | 区间内振动 |
-| `slope_feedback` | 0x24 | `start` `end` `start_force` `end_force` | 阻力斜坡 |
-| `slope_weapon` | 0x25 | `start` `end` `amp_a` `amp_b` `freq` | 带斜坡的两段式 |
-| `machine` | 0x26 | `start` `end` `freq` `period` | 周期性脉冲（模拟枪） |
+| `off` | 0x00 | — | 关闭力反馈，行程自由 |
+| `rigid` | 0x01 | `start`(0..9), `force`(0..255) | 达到指定行程后施加恒定阻力 |
+| `section` / `pulse` | 0x02 | `start`, `end` | 仅在指定行程区间内施加阻力 |
+| `feedback` | 0x21 | `start`, `strength`, `force` | 阻力随行程递增（适用于瞄准镜阻力挡墙） |
+| `weapon` | 0x22 | `start`, `amp_a`, `amp_b`, `freq` | 两段式击发触感（模拟机械扳机击锤释能） |
+| `vibration` | 0x23 | `start`, `amplitude`, `freq` | 指定行程区间内的高频振动 |
+| `slope_feedback` | 0x24 | `start`, `end`, `start_force`, `end_force` | 行程范围内的斜坡线性阻力 |
+| `slope_weapon` | 0x25 | `start`, `end`, `amp_a`, `amp_b`, `freq` | 带阻力梯度的两段式扳机 |
+| `machine` | 0x26 | `start`, `end`, `freq`, `period` | 周期性脉冲冲击（模拟全自动连发） |
 
-任何 mode 都支持裸参数 `p0`..`p9` 直接写线格式，便于试出社区还没记录的效果。
+除语义参数外，所有模式均支持直接传递底层参数 `p0` 至 `p9`，便于测试固件新特性。
 
-`modulate`（只对 `rumble_left/right` 生效）：
+针对震动通道（`rumble_left` / `rumble_right`），支持通过 `modulate` 定义调幅：
 
 ```yaml
-modulate: { type: sine, hz: 14, depth: 0.85 }   # 正弦调幅，ABS 脉冲常用 14~20Hz
-modulate: { type: square, hz: 30, depth: 1.0 }  # 方波，机械感
+modulate: { type: sine, hz: 16, depth: 0.85 }   # 正弦调幅（适用于 ABS 刹车脉冲）
+modulate: { type: square, hz: 30, depth: 1.0 }  # 方波调幅（适用于机械碰撞反馈）
 ```
 
 ---
 
-## 标准信号表
+## 标准信号列表
 
-| 来源 | 信号 |
+| 类别 | 信号名称与取值规范 |
 |---|---|
-| 车辆遥测 | `throttle` `brake` `clutch` `steer` `speed`(km/h) `rpm`(0..1) `gear` `slip` `lockup` `abs` `tc` `rumble` `accel_g` `lat_g` `surface` |
-| 手柄输入 | `l2` `r2`（0..1）`l2_full` `r2_full` `l1` `r1` `cross` `circle` `square` `triangle` `up` `down` `left` `right` `lx` `ly` `rx` `ry` `stick_l` `stick_r` `ps` `touchpad` `mute` |
-| 自定义 | `custom0`..`custom3` |
+| **车辆遥测** | `throttle`, `brake`, `clutch`, `slip`, `lockup`, `abs`, `tc`, `rumble`：归一化至 `[0, 1]`<br>`steer`：方向盘转角，取值范围 `[-1, 1]`<br>`speed`：时速（km/h）<br>`rpm`：转速，按红线转速归一化至 `[0, 1]`<br>`gear`：档位数值<br>`accel_g`, `lat_g`：加速度 G 值<br>`surface`：路面材质标识 |
+| **手柄输入** | `l2`, `r2`：模拟量行程，取值范围 `[0, 1]`<br>`l2_full`, `r2_full`：行程触底开关（bool）<br>`l1`, `r1`, `cross`, `circle`, `square`, `triangle`, `up`, `down`, `left`, `right`, `ps`, `touchpad`, `mute`：按键状态（bool）<br>`lx`, `ly`, `rx`, `ry`：摇杆坐标，取值范围 `[-1, 1]`<br>`stick_l`, `stick_r`：摇杆下压开关（bool） |
+| **自定义扩展** | `custom0` ~ `custom3`：供特殊遥测项绑定的用户自定义通道 |
 
-约定：**归一化量都在 0..1**（`steer`/摇杆为 -1..1），速度 km/h，`rpm` 已按红线归一化。各解码器的具体映射见 `internal/source/udp/decoders.go` 顶部注释。
-
----
-
-## 校准一个没有内置支持的游戏
-
-以尘埃拉力为例（任何 UDP 遥测游戏同理）：
-
-```bash
-# 1. 抓包：进赛段，反复踩死/松开油门
-./bin/ds5ctl sniff -listen :20777
-
-# 2. 观察出现了几种包长，哪个 4 字节在 0.0~1.0 之间连续变化（多半是 f32 的油门/刹车）
-
-# 3. 填进 profile 的 fields 块（不用改 Go 代码）
-#    source:
-#      type: udp
-#      decoder: fields
-#      fields:
-#        throttle: { off: 116, fmt: f32 }
-#        brake:    { off: 120, fmt: f32 }
-#        speed:    { off: 8,   fmt: f32, scale: 3.6 }
-#        gear:     { off: 132, fmt: u8 }
-#      derived:
-#        slip: "max(abs(slip_fl), abs(slip_fr))"
-
-# 4. 验证数值范围
-./bin/ds5d -dry-run -profile dirt-family -trace
-
-# 5. 去掉 -dry-run 正常使用
-```
-
-`fmt` 支持 `u8` `s8` `u16` `s16` `u32` `s32` `f32`，可加 `scale` / `bias`（`value = raw*scale + bias`），`derived` 里可以用任意表达式组合字段。
+各解码器的具体映射实现可参阅 `internal/source/udp/decoders.go`。
 
 ---
 
-## Windows
+## 新游戏遥测校准指南
 
-设备层已经按平台分文件（`internal/device/hidraw_{linux,windows,other}.go`），Windows 侧用 SetupAPI 枚举 HID 接口 + `CreateFile`/`WriteFile`/`ReadFile`，输出报告与 Linux 共用（USB 48 字节 / BT 78 字节 + CRC）。
+对于未内置专用解码器的 UDP 遥测游戏，可通过动态字段解析（`fields`）模式在几分钟内完成适配：
 
-**状态：能编译、逻辑与 Linux 对齐，但未在 Windows 真机验证。** 首次上机需要重点确认：
+1. **抓包监听**：进入驾驶状态并规律触发油门/刹车操作，执行抓包监听：
+   ```bash
+   ./bin/ds5ctl sniff -listen :20777
+   ```
+2. **分析报文**：观察终端输出的数据包长度，定位在 `0.0 ~ 1.0` 之间随操作变化的 4 字节偏移（通常为单精度浮点数 `f32` 格式）。
+3. **编写 Profile**：在 YAML 中声明提取规则，无需修改 Go 代码：
+   ```yaml
+   source:
+     type: udp
+     decoder: fields
+     fields:
+       speed:    { off: 8,   fmt: f32, scale: 3.6 }  # 转换 m/s 为 km/h
+       throttle: { off: 116, fmt: f32 }
+       brake:    { off: 120, fmt: f32 }
+       gear:     { off: 132, fmt: u8 }
+     derived:
+       slip: "max(abs(slip_fl), abs(slip_fr))"
+   ```
+4. **离线校验**：执行仿真命令检查数值解析是否正常：
+   ```bash
+   ./bin/ds5d -dry-run -profile custom-game -trace
+   ```
+5. **正式运行**：移除 `-dry-run` 启动正常服务。
 
-1. 蓝牙报告的 `0x31` 布局与 CRC32 位置（`internal/hid/report.go`）
-2. 输入报告读取是否需要 OVERLAPPED 才能被正常打断
-3. 与 Steam Input 的写冲突（Windows 上 Steam 会同时写震动）
+字段类型 `fmt` 支持 `u8`, `s8`, `u16`, `s16`, `u32`, `s32`, `f32`，并支持配置线性缩放参数 `scale` 与 `bias`（计算式：`value = raw * scale + bias`）。
+
+---
+
+## 平台支持（Linux / Windows）
+
+硬件控制层已实现跨平台解耦（`internal/device/`）：
+
+- **Linux**：原生操作 `/dev/hidraw*` 设备节点，性能稳定且延迟低。
+- **Windows**：通过 SetupAPI 枚举设备并通过 Win32 文件句柄读写 HID 报告，代码逻辑与 Linux 保持一致。
+
+> **Windows 实验性状态说明**：
+> Windows 平台当前已完成代码实现并支持交叉编译，但缺乏长期真机测试。部署至 Windows 时需注意：
+> 1. 验证蓝牙模式下 0x31 报告与 CRC32 校验的兼容性；
+> 2. 避免 Steam Input 等具有独占性或优先级的后台驱动抢占控制器震动端口。
 
 ```bash
 make windows
@@ -411,108 +425,92 @@ bin/ds5d.exe -profile fps -trace
 
 ## 故障排查
 
-| 现象 | 原因 / 处理 |
-|---|---|
-| `ds5ctl list` 空 | 没插 USB / udev 规则未生效（重新插拔）/ 权限 |
-| `device: no DualSense found` 一直重试 | 同上；或 VID/PID 为第三方 DS5 兼容手柄，用 `-hidraw` 指定 |
-| 扳机没阻力但有震动 | 选错 hidraw 节点（多接口），`ds5ctl bench -hidraw /dev/hidrawN` 逐个试 |
-| 有震动但扳机手感怪异 | 换效果模式：`ds5ctl bench` 对比 8 种；参数语义在不同固件上有差异 |
-| 游戏里完全没反应 | 守护进程没跑；`-trace` 看有没有信号 |
-| Forza 没数据 | 游戏里 Data Out 没开 / IP 不是本机 / **格式选了 Sled（232 字节，不含油门刹车）** |
-| BeamNG 没数据 | Options → Other → OutGauge 未开启 |
-| 尘埃/F1 数值乱跳 | 偏移猜错了，用 `ds5ctl sniff` 重新校准（不要用模板里的注释值直接跑） |
-| 与 Steam Input 抢震动 | 游戏属性里关闭 Steam Input，或让 Steam 只管输入 |
-| 蓝牙下扳机时好时坏 | 换成 USB 线 |
+| 异常现象 | 可能原因 | 推荐处置方式 |
+|---|---|---|
+| `ds5ctl list` 无法检测到设备 | 物理连接异常 / udev 权限未生效 | 检查 USB 接口连接；确认已执行 `make install-udev` 并重新插拔手柄 |
+| 持续输出 `no DualSense found` 并重试 | 设备 VID/PID 未收录或属第三方兼容控制器 | 使用 `-hidraw /dev/hidrawN` 显式指定具体设备路径 |
+| 马达可震动，但扳机无力反馈阻力 | 控制器暴露了多个 hidraw 节点且选择了非主通信节点 | 使用 `ds5ctl bench -hidraw /dev/hidrawN` 遍历节点以确认控制端口 |
+| 阻力模式与预期不符 | 控制器固件版本差异对模式解析存在微小偏差 | 使用 `ds5ctl bench` 对比 8 种内置效果，选择最适匹配模式 |
+| 游戏内动作无响应 | 守护进程未启动或未收到有效数据流 | 添加 `-trace` 参数查看信号接收与解析状态 |
+| Forza 系列无遥测数据输入 | 游戏内 Data Out 未开启，或输出格式未选择 **Dash** | 确认游戏设置中的 IP 地址、端口（5300），数据格式必须设为 **Dash**（不能选 Sled） |
+| BeamNG.drive 无数据输入 | OutGauge 功能未启用 | 检查「选项 → 其他 → OutGauge 协议」是否正确启用并指向 4444 端口 |
+| 尘埃 / F1 遥测数据异常波动 | 报文偏移不匹配 | 使用 `ds5ctl sniff` 重新捕获当前游戏版本的数据包并核准偏移配置 |
+| 与 Steam 产生控制冲突 | Steam Input 抢占写入力反馈与震动通道 | 在 Steam 游戏属性中关闭该游戏的 Steam Input 支持 |
+| 蓝牙连接下手感断续不稳 | 蓝牙传输抖动或带宽受限 | 优先改用 USB Type-C 有线连接 |
 
 ---
 
 ## 目录结构
 
 ```
-cmd/ds5d/                 守护进程（profile → source → rules → sink）
-cmd/ds5ctl/               设备/配置/校准工具
-cmd/ds5bridge/            Windows 侧共享内存桥（在 Proton 前缀内运行）
+cmd/
+  ds5d/                   主守护进程（负责 Source → Rules → Sink 链路调度）
+  ds5ctl/                 维护与辅助工具（设备检测、配置预检、抓包校准）
+  ds5bridge/              Windows 共享内存桥接器（在 Proton / Wine 前缀内运行）
 internal/
-  bridge/                 桥的线格式 + 共享内存布局（ac/acc/acr）
-  hid/                    报告构造（USB/BT）、扳机效果库
-  device/                 设备抽象 + hidraw(Linux) / HID(Windows) / stub(其它)
-  input/                  DualSense 输入报告解析
-  signal/                 信号词汇表 + 带时间戳/整形的信号集
-  profile/                profile 结构 + 内置 profile（go:embed）
-  rules/                  表达式编译与求值、优先级/锁存/衰减
-  sink/                   固定 tick 输出、退出回收
-  report/                 按传输方式选择报告格式
-  source/                 Source 接口 + 注册表
-    trigger/              输入驱动（任意游戏）
-    udp/                  原生遥测（forza / outgauge / dirt / acshm / fields）
-    sim/                  无设备脚本源（开发/测试）
-udev/70-dualsense.rules   免 root 访问 hidraw
-scripts/launch-bridge.sh  把桥塞进指定 AppID 的 Proton 前缀
-tools/bridgesim/          模拟桥输出（无游戏时验证链路）
-profiles/                 放你自己的 profile（用 -profiles 指定）
+  bridge/                 桥接通信协议定义与共享内存结构（AC/ACC/ACR）
+  hid/                    HID 输出报告封装与扳机参数库
+  device/                 跨平台设备读写接口（Linux hidraw / Windows HID）
+  input/                  DualSense 原始输入报告解析
+  signal/                 标准信号字典与时间序列前置处理
+  profile/                Profile 结构体定义与内置 YAML 解析
+  rules/                  表达式解析引擎、优先级控制与状态锁存衰减
+  sink/                   高精度时钟驱动与退出状态重置
+  report/                 传输模式自适应输出报告构建
+  source/                 数据源驱动接入实现
+    trigger/              手柄按键与扳机行程驱动源
+    udp/                  UDP 遥测驱动（Forza / OutGauge / DiRT / ACSHM / Fields）
+    sim/                  离线仿真数据源
+udev/70-dualsense.rules   Linux 非 root 读写权限规则
+scripts/launch-bridge.sh  Proton 前缀桥接启动脚本
+tools/bridgesim/          共享内存桥接数据流本地仿真器
+profiles/                 用户自定义 Profile 目录
 ```
 
 ---
 
 ## 协议参考
 
-- DualSense 输出报告 / 扳机效果：Linux 内核 `drivers/hid/hid-playstation.c`（`dualsense_output_report_common`、`DS_TRIGGER_EFFECT_*`）、`flok/pydualsense`
-- Forza Data Out（Sled 232B / Dash 311B）：`Forza-Motorsport-Data-Out` 系列文档
-- OutGauge（LFS / BeamNG）：`outgauge_packet` C 结构，92+ 字节
-- Codemasters UDP（尘埃/F1）：各版本规格不同，务必先用 `ds5ctl sniff` 核对
+- **DualSense HID 协议**：参考 Linux 内核官方驱动 `drivers/hid/hid-playstation.c` 及社区反向工程成果。
+- **Forza Data Out 协议**：支持 Sled（232 字节）与 Dash（311 字节）格式。
+- **OutGauge 协议**：标准 OutGauge C 语言数据报文规范。
+- **Codemasters UDP 协议**：基于 `ds5ctl sniff` 对不同年份版本进行字段级提取。
 
 ---
 
-## Roadmap
+## 开发计划
 
-- [x] **Assetto Corsa / ACC / AC Rally**：`cmd/ds5bridge`（Proton 前缀内）+ `acshm` 解码器
-- [ ] **rFactor 2 / LMU、ETS2 / ATS**：同一套桥，加新的共享内存布局（`internal/bridge/layout.go`）
-- [ ] **iRacing**：SDK 内存映射，布局同样走 `internal/bridge`
-- [ ] **`source/ffb`**：uinput 虚拟手柄镜像游戏的力反馈 → 「游戏在震多强」变成信号，覆盖无遥测的 FPS/动作游戏
-- [ ] **`source/audio`**：PipeWire 频谱包络兜底（枪声/爆炸驱动扳机微颤）
-- [ ] **Windows 真机验证**：蓝牙报告、OVERLAPPED 读、Steam Input 冲突
-- [ ] **焦点仲裁**：同时开多个 profile，按活动窗口自动切换
-- [ ] **`ds5d replay`**：录制/回放信号，做手感回归测试
+- [x] **Assetto Corsa / ACC / AC Rally**：提供 `ds5bridge` Proton 桥接支持与 `acshm` 解码器
+- [ ] **rFactor 2 / LMU、ETS2 / ATS**：基于桥接架构扩展共享内存布局解析
+- [ ] **iRacing 支持**：接入 iRacing 内存映射 SDK
+- [ ] **力反馈镜像驱动（`source/ffb`）**：通过 uinput 虚拟设备捕获标准力反馈，适配无遥测的射击与动作游戏
+- [ ] **音频包络驱动（`source/audio`）**：基于 PipeWire 捕获系统低频音频生成自适应触感
+- [ ] **焦点窗口仲裁**：依据前台活跃窗口自动平滑切换 Profile
+- [ ] **遥测录制与回放（`ds5d replay`）**：支持测试数据录制，用于回归调试
 
 ---
 
-## 发布与产物
+## 发行包组件说明
 
-推 tag 触发流水线（`verify` → `build` 矩阵 → `release`）：
+通过 GitHub Releases 下载发布的归档包（`ds5c-<os>-<arch>.tar.gz` 或 `.zip`）包含以下核心组件：
 
-```bash
-git tag v0.1.3 && git push origin v0.1.3
-```
-
-发布正文由 `.github/scripts/release-notes.sh` 生成：**`CHANGELOG.md` 里对应 tag 的小节**
-+ 包内文件说明 + 快速开始 + compare 链接。所以发版前先写 CHANGELOG（标题就用 `## v0.1.3`）。
-
-下载 `ds5c-<os>-<arch>.tar.gz`（Windows 为 `.zip`）后，包内每个文件的作用：
-
-| 文件 | 平台 | 干什么用的 |
+| 文件名称 | 适用平台 | 功能说明 |
 |---|---|---|
-| **`ds5d` / `ds5d.exe`** | 全部 | **主程序**。加载 profile → 收 source 信号 → 算规则 → 以 125~250 Hz 写手柄。常驻后台 |
-| **`ds5ctl` / `ds5ctl.exe`** | 全部 | **运维工具**。`list` 找手柄、`test` 硬件自检、`bench` 逐个试扳机效果、`watch` 校准按键位、`sniff` 校准 UDP 偏移、`check` 离线验证 profile |
-| **`ds5bridge.exe`** | 全部（**永远是 Windows 程序**） | **只有 AC / ACC / AC Rally 用**。必须放进游戏的 Proton 前缀里运行，读 `acpmf_physics` 再回传 UDP。Linux 包里也带它，因为 Proton 只认 `.exe` |
-| `profiles/` | 全部 | 自定义 profile 模板。内置的 6 个已编进 `ds5d`，不依赖这个目录 |
-| `udev/70-dualsense.rules` | Linux | 一次性安装，让普通用户写 `/dev/hidraw*`（否则每次都要 sudo） |
-| `scripts/launch-bridge.sh` | Linux | 把桥塞进指定 Steam AppID 的 Proton 前缀（`protontricks-launch` 优先，退回 Proton wine） |
-| `README.md` / `LICENSE` | 全部 | 文档 / MIT 许可 |
-| `ds5c-*.sha256`、`SHA256SUMS` | — | 校验下载完整性：`sha256sum -c` |
+| **`ds5d` / `ds5d.exe`** | 全部 | **核心守护程序**：加载 Profile，接收数据源信号，执行规则运算并以 125~250 Hz 写入控制器 |
+| **`ds5ctl` / `ds5ctl.exe`** | 全部 | **设备与配置工具**：设备枚举、硬件自检、离线规则验证及遥测抓包校准 |
+| **`ds5bridge.exe`** | Windows / Proton | **共享内存桥接程序**：用于 AC / ACC / AC Rally，在 Proton 前缀内读取共享内存并转为 UDP 回传 |
+| `profiles/` | 全部 | 自定义 Profile 模版文件（6 种常见内置配置已静态编译入二进制） |
+| `udev/70-dualsense.rules` | Linux | 权限配置文件，配置普通用户对 `/dev/hidraw*` 的读写权限 |
+| `scripts/launch-bridge.sh` | Linux | 便捷启动脚本，自动定位 Steam AppID 前缀并启动桥接程序 |
 
-最小用法：
+### 常见场景组件选配
 
-| 你的场景 | 需要哪些文件 |
-|---|---|
-| Linux + 射击游戏（无需遥测） | `ds5d` + `ds5ctl`（`udev/` 装一次） |
-| Linux + Forza / BeamNG | `ds5d` + `ds5ctl`，游戏里开 Data Out / OutGauge |
-| Linux + AC / ACC / AC Rally | 上面全部 + `ds5bridge.exe` + `scripts/launch-bridge.sh` |
-| Windows | `ds5d.exe` + `ds5ctl.exe`（实验性，见 [Windows](#windows)） |
-
-版本号在构建时通过 `-X main.version=<tag>` 注入，`ds5d -version`、`ds5ctl version` 可查。
+- **全平台通用射击游戏（免遥测）**：部署 `ds5d` 与 `ds5ctl`，Linux 平台预先安装 `udev` 规则即可。
+- **原生 UDP 遥测游戏（如 Forza / BeamNG）**：运行 `ds5d`，并在游戏设置中启用数据外发。
+- **Proton 共享内存游戏（如 ACC）**：同时部署 `ds5d`、`ds5bridge.exe`，并通过 `launch-bridge.sh` 注入前缀。
 
 ---
 
-## License
+## 许可证
 
-MIT
+本项目采用 [MIT License](LICENSE) 授权许可开源。

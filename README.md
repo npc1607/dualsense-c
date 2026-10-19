@@ -6,6 +6,7 @@
 
 - **全游戏通用（输入驱动）**：不依赖游戏支持，读取控制器自带的 L2/R2 扳机行程与按键，实现瞄准挡墙与射击后坐力反馈。
 - **全传感器与手柄状态接入**：内置解析 6 轴运动传感器（陀螺仪角速度 / 加速度计）、触控板坐标、电池电量与充电状态，支持独立控制静音键 LED 与 5 颗玩家指示灯。
+- **音频 AI 事件与材质探测（实验性）**：支持通过伴生小模型（Google YAMNet ONNX，纯 CPU INT8）实时分析系统游戏声音，为无遥测游戏识别物理材质（水洼/铁网/沙地）与战斗音效（枪声/爆炸），隔空实现高维触感反馈。
 - **原生遥测支持**：内置支持 Forza Horizon 4/5（UDP 5300）、BeamNG / Live for Speed（OutGauge 4444），并提供 DiRT Rally / EA WRC / F1 系列的字段级动态校准能力。
 - **Proton / Wine 共享内存桥接**：针对 Assetto Corsa / ACC / AC Rally 等依赖 Windows 命名共享内存（`acpmf_physics`）的游戏，提供轻量 Windows 桥接程序 `ds5bridge.exe`，在 Proton 前缀内读取数据并回传至原生守护进程。
 - **纯 Go 实现、零 CGO 依赖**：Linux 环境原生读写 `/dev/hidraw`，Windows 环境直接调用 HID API。
@@ -178,11 +179,14 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 
 ## 游戏支持矩阵
 
-### 1. 输入驱动模式（无需游戏支持，全游戏通用）
+### 3. 游戏支持矩阵
+
+#### A. 输入驱动模式（无需游戏支持，全游戏通用）
 
 | 数据源类型 | 工作机制 | 支持状态 |
 |---|---|---|
 | `trigger` 源 | 解析控制器自身的输入报告（L2/R2 行程、按键状态、摇杆偏移），通过规则引擎生成阻力、挡墙与震动反馈 | ✅ 生产可用 |
+| `audio_ai` 源 | 监听本地伴生探测器（YAMNet ONNX 实时分析系统声卡混音），输出水洼/铁板/枪声等事件信号 | 🧪 实验性可用（详见 [方案文档](docs/audio-ai-event-detection.md)） |
 
 适用于 FPS、TPS 及各类动作游戏。不受游戏本身是否支持 DualSense 限制（需注意避免与 Steam Input 的震动控制产生抢占冲突）。
 
@@ -459,6 +463,7 @@ modulate: { type: square, hz: 30, depth: 1.0 }  # 方波调幅（适用于机械
 | **手柄传感器与状态** | `gyro_x`, `gyro_y`, `gyro_z`：6 轴角速度（小端 int16 归一化至 `[-1, 1]`）<br>`accel_x`, `accel_y`, `accel_z`：6 轴线性加速度（小端 int16 归一化至 `[-1, 1]`）<br>`touch_x`, `touch_y`：触控板首个触点归一化坐标 `[0, 1]`（基于 1920×1080 分辨率）<br>`touch_active`：触控板是否处于触摸接触状态（bool）<br>`battery`：电池电量等级（`0.0 ~ 1.0`，以 10% 步长递增）<br>`charging`：电池充电中标志（bool） |
 | **音频包络（source/audio）** | `bass`（20~110Hz）、`mid`（160~450Hz）、`loudness`（全带）：归一化 `[0, 1]`，已做 attack/release 平滑 |
 | **力反馈（source/ffb）** | `ffb_left`、`ffb_right`：虚拟手柄捕获到的游戏 rumble 幅度，`[0, 1]` |
+| **音频 AI 材质与战况** | `surface_water`, `surface_metal`, `surface_wood`, `surface_gravel`：地面物理材质置信度（`0.0 ~ 1.0`）<br>`audio_gunshot`, `audio_explosion`, `audio_impact`：交火与受击事件置信度（`0.0 ~ 1.0`） |
 | **自定义扩展** | `custom0` ~ `custom3`：供特殊遥测项绑定的用户自定义通道 |
 
 各解码器的具体映射实现可参阅 `internal/source/udp/decoders.go`。
@@ -584,6 +589,7 @@ profiles/                 用户自定义 Profile 目录
 - [x] **高清音圈触感（Voice-Coil Haptics）**：`sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM 驱动左右音圈（`haptic_left` / `haptic_right` target），Linux 已验证；Windows 走 `haptics.command` 换成 WASAPI 侧命令即可
 - [x] **力反馈镜像驱动（`source/ffb`）**：`ds5vpad` 用 uinput 建虚拟 Xbox 手柄并独占物理手柄，捕获 FF_RUMBLE 上传幅度后经 UDP 9998 交给 `ds5d`（Linux 已验证；Windows 后端见 `internal/vpad/vpad_windows.go`）
 - [x] **音频包络触感推断（`source/audio`）**：`parec` 抓 monitor → 三段带通（bass/mid/loudness）包络，可直接驱动音圈或马达
+- [x] **音频 AI 事件与材质探测器原型（`source/audioai`）**：基于 YAMNet ONNX 模型实时推断水洼/铁板/木板/碎石材质与交火音效（[方案文档](docs/audio-ai-event-detection.md)）
 - [ ] **rFactor 2 / LMU、ETS2 / ATS**：基于桥接架构扩展共享内存布局解析
 - [ ] **iRacing 支持**：接入 iRacing 内存映射 SDK
 - [ ] **触控板多指手势识别**：支持双指滑动、捏合映射为虚拟轮盘/旋钮

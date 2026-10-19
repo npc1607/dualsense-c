@@ -1,0 +1,66 @@
+name: audio-ai-demo
+title: 音频 AI 材质与战况事件探测演示
+description: |
+  配合 tools/yamnet_bridge 使用，通过本地轻量音频小模型识别
+  地面材质（水洼/铁板/碎石）与交火音效（枪声/爆炸），动态驱动自适应扳机与力反馈。
+
+source:
+  type: audio_ai
+  listen: "127.0.0.1:9998"
+  rate_hz: 60
+
+safety:
+  signal_ttl: 600ms
+  release: 250ms
+  status_lightbar: true
+
+rules:
+  # 1. 涉水奔跑：检测到水花时，左右马达交替呈现高频低阻尼水波微颤
+  - name: water-step
+    when: 'has("surface_water") && surface_water > 0.4'
+    target: rumble_left
+    priority: 20
+    value: "clamp(120 * surface_water, 40, 160)"
+    modulate: { type: sine, hz: 60, depth: 0.8 }
+
+  # 2. 踩在铁板/金属表面：呈现高频清脆共鸣感
+  - name: metal-step
+    when: 'has("surface_metal") && surface_metal > 0.45'
+    target: rumble_right
+    priority: 20
+    value: "clamp(140 * surface_metal, 50, 180)"
+    modulate: { type: square, hz: 180, depth: 0.9 }
+
+  # 3. 枪声瞬态反馈：检测到枪声时，右马达瞬间释放强烈后坐力脉冲
+  - name: gunshot-recoil
+    when: 'has("audio_gunshot") && audio_gunshot > 0.5'
+    target: rumble_right
+    priority: 50
+    hold: 120ms
+    value: "220"
+
+  # 4. 爆炸波及：检测到爆炸时，双马达重度低频下沉震动
+  - name: explosion-blast
+    when: 'has("audio_explosion") && audio_explosion > 0.5'
+    target: rumble_left
+    priority: 60
+    hold: 250ms
+    value: "255"
+    modulate: { type: sine, hz: 25, depth: 0.7 }
+
+  # 5. 瞄准扳机挡墙（模拟按键输入）
+  - name: aim-wall
+    when: "l2 < 0.5"
+    target: l2
+    effect: feedback
+    priority: 10
+    params:
+      start: "0"
+      strength: "4"
+      force: "150"
+
+  - name: aim-release
+    when: "l2 >= 0.5"
+    target: l2
+    effect: off
+    priority: 25

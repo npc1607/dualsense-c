@@ -476,20 +476,37 @@ profiles/                 放你自己的 profile（用 -profiles 指定）
 
 ---
 
-## 发布（GitHub Actions）
+## 发布与产物
 
-`.github/workflows/release.yml`：推 tag 即构建并发布。
+推 tag 触发流水线（`verify` → `build` 矩阵 → `release`）：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
-- `verify`：gofmt / vet / test / 三平台交叉编译，任一失败则中止
-- `build`：矩阵 `linux-amd64`、`linux-arm64`、`windows-amd64`，产物含 `ds5d`、`ds5ctl`、**`ds5bridge.exe`**、`profiles/`、`README`、`LICENSE`、`udev/`、`scripts/`
-- 版本号通过 `-X main.version=<tag>` 注入，`ds5d -version` / `ds5ctl version` 可查
-- `release`：合并产物 → 生成 `SHA256SUMS` → `gh release create`（已存在则 `--clobber` 覆盖上传）
-- 也可以在 Actions 页面手动 `workflow_dispatch`，填一个 tag
+下载 `ds5c-<os>-<arch>.tar.gz`（Windows 为 `.zip`）后，包内每个文件的作用：
+
+| 文件 | 平台 | 干什么用的 |
+|---|---|---|
+| **`ds5d` / `ds5d.exe`** | 全部 | **主程序**。加载 profile → 收 source 信号 → 算规则 → 以 125~250 Hz 写手柄。常驻后台 |
+| **`ds5ctl` / `ds5ctl.exe`** | 全部 | **运维工具**。`list` 找手柄、`test` 硬件自检、`bench` 逐个试扳机效果、`watch` 校准按键位、`sniff` 校准 UDP 偏移、`check` 离线验证 profile |
+| **`ds5bridge.exe`** | 全部（**永远是 Windows 程序**） | **只有 AC / ACC / AC Rally 用**。必须放进游戏的 Proton 前缀里运行，读 `acpmf_physics` 再回传 UDP。Linux 包里也带它，因为 Proton 只认 `.exe` |
+| `profiles/` | 全部 | 自定义 profile 模板。内置的 6 个已编进 `ds5d`，不依赖这个目录 |
+| `udev/70-dualsense.rules` | Linux | 一次性安装，让普通用户写 `/dev/hidraw*`（否则每次都要 sudo） |
+| `scripts/launch-bridge.sh` | Linux | 把桥塞进指定 Steam AppID 的 Proton 前缀（`protontricks-launch` 优先，退回 Proton wine） |
+| `README.md` / `LICENSE` | 全部 | 文档 / MIT 许可 |
+| `ds5c-*.sha256`、`SHA256SUMS` | — | 校验下载完整性：`sha256sum -c` |
+
+最小用法：
+
+| 你的场景 | 需要哪些文件 |
+|---|---|
+| Linux + 射击游戏（无需遥测） | `ds5d` + `ds5ctl`（`udev/` 装一次） |
+| Linux + Forza / BeamNG | `ds5d` + `ds5ctl`，游戏里开 Data Out / OutGauge |
+| Linux + AC / ACC / AC Rally | 上面全部 + `ds5bridge.exe` + `scripts/launch-bridge.sh` |
+| Windows | `ds5d.exe` + `ds5ctl.exe`（实验性，见 [Windows](#windows)） |
+
+版本号在构建时通过 `-X main.version=<tag>` 注入，`ds5d -version`、`ds5ctl version` 可查。
 
 ---
 

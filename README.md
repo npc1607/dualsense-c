@@ -169,6 +169,9 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 | **高清音圈触感 (Voice-Coil)** | ✅ 可用（Linux 实测） | `sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM（`haptic_left/haptic_right`）。**前提**：HID 报告空闲时不得声明 `COMPATIBLE_VIBRATION/HAPTICS_SELECT`，否则执行器被锁在 HID 引擎上、音频流被忽略 |
 | **手柄内置扬声器** | ⚠️ 通路已验证，无专用 sink | Ch1/2 实测可出声；任何能写 PipeWire sink 的工具都能用，本项目未封装 |
 
+> 音频 AI 的接入方式、推理流程、HD 触感触发路径与调优见
+> 👉 **[音频 AI 接入与 HD 触感（含流程图）](docs/audio-ai-haptics.md)**
+>
 > 音频触感与力反馈镜像的实现细节、真机实测数据与踩坑记录见
 > 👉 **[音频触感与力反馈镜像：设计与踩坑记录](docs/audio-haptics-and-ffb.md)**
 >
@@ -374,9 +377,12 @@ DS5 同时是一块 4 声道 48kHz USB 声卡，Ch3/4 直连左右音圈。HID �
 
 ```yaml
 haptics:
+  mode: passthrough   # synth=合成载波 | passthrough=游戏音频直通（HD）
   target: auto        # PipeWire sink 名，或 auto 自动找 DualSense
-  carrier_hz: 55      # 合成波形基频
-  gain: 0.55          # 0..255 规则输出 → PCM 幅度
+  low_hz: 55          # passthrough 通带下限
+  high_hz: 200        # 上限
+  carrier_hz: 55      # synth 模式的基频
+  gain: 0.7           # 总输出增益
   command: "pacat --playback --device={target} --rate={rate} --channels={channels} --format=s16le --raw"
 ```
 
@@ -462,6 +468,8 @@ modulate: { type: square, hz: 30, depth: 1.0 }  # 方波调幅（适用于机械
 | **手柄按键与摇杆** | `l2`, `r2`：模拟量行程，取值范围 `[0, 1]`<br>`l2_full`, `r2_full`：行程触底开关（bool）<br>`l1`, `r1`, `cross`, `circle`, `square`, `triangle`, `up`, `down`, `left`, `right`, `ps`, `touchpad`, `mute`：按键状态（bool）<br>`lx`, `ly`, `rx`, `ry`：摇杆坐标，取值范围 `[-1, 1]`<br>`stick_l`, `stick_r`：摇杆下压开关（bool） |
 | **手柄传感器与状态** | `gyro_x`, `gyro_y`, `gyro_z`：6 轴角速度（小端 int16 归一化至 `[-1, 1]`）<br>`accel_x`, `accel_y`, `accel_z`：6 轴线性加速度（小端 int16 归一化至 `[-1, 1]`）<br>`touch_x`, `touch_y`：触控板首个触点归一化坐标 `[0, 1]`（基于 1920×1080 分辨率）<br>`touch_active`：触控板是否处于触摸接触状态（bool）<br>`battery`：电池电量等级（`0.0 ~ 1.0`，以 10% 步长递增）<br>`charging`：电池充电中标志（bool） |
 | **音频包络（source/audio）** | `bass`（20~110Hz）、`mid`（160~450Hz）、`loudness`（全带）：归一化 `[0, 1]`，已做 attack/release 平滑 |
+| **瞬态检测（source/audio）** | `onset`：fast/slow 包络之差，对背景音量免疫，用于枪声/撞击起音 |
+| **音频 AI（YAMNet, `-tags onnx`）** | `surface_water/metal/wood/gravel`、`audio_gunshot/explosion/impact`：模型置信度 `[0, 1]` |
 | **力反馈（source/ffb）** | `ffb_left`、`ffb_right`：虚拟手柄捕获到的游戏 rumble 幅度，`[0, 1]` |
 | **音频 AI 材质与战况** | `surface_water`, `surface_metal`, `surface_wood`, `surface_gravel`：地面物理材质置信度（`0.0 ~ 1.0`）<br>`audio_gunshot`, `audio_explosion`, `audio_impact`：交火与受击事件置信度（`0.0 ~ 1.0`） |
 | **自定义扩展** | `custom0` ~ `custom3`：供特殊遥测项绑定的用户自定义通道 |
@@ -553,8 +561,9 @@ internal/
   signal/                 标准信号字典与时间序列前置处理
   profile/                Profile 结构体定义与内置 YAML 解析
   rules/                  表达式解析引擎、优先级控制与状态锁存衰减
+  audioai/                YAMNet 推理引擎（ONNX Runtime C API，-tags onnx）
   sink/                   高精度时钟驱动与退出状态重置
-    haptics/              音圈 PCM 合成与 4 声道输出
+    haptics/              音圈输出：合成载波 / 游戏音频直通(passthrough)
   vpad/                   虚拟手柄后端（Linux uinput / Windows 占位）
   report/                 传输模式自适应输出报告构建
   source/                 数据源驱动接入实现

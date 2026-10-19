@@ -77,6 +77,14 @@ type Haptics struct {
 	Gain float64 `yaml:"gain"`
 	// Command overrides the playback command template.
 	Command string `yaml:"command"`
+	// Mode is "synth" (fixed carrier) or "passthrough" (filter the game audio
+	// and send it to the coils — real HD texture).
+	Mode string `yaml:"mode"`
+	// Source is the monitor to capture in passthrough mode ("auto" = default).
+	Source string `yaml:"source"`
+	// LowHz/HighHz bound the band sent to the coils (default 25–180).
+	LowHz  float64 `yaml:"low_hz"`
+	HighHz float64 `yaml:"high_hz"`
 }
 
 // IsEnabled reports whether haptic output should be opened.

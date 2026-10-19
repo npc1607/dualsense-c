@@ -2,6 +2,7 @@ package haptics
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 )
 
@@ -89,5 +90,60 @@ func TestChannelsAreIndependent(t *testing.T) {
 	}
 	if right > 0 {
 		t.Errorf("right coil = %d while amplitude 0", right)
+	}
+}
+
+// Passthrough mode must (a) band-limit the game audio and (b) scale it by the
+// rule gain, so the coils reproduce the real spectrum instead of a carrier.
+func TestPassthroughFiltersAndScales(t *testing.T) {
+	w := &Writer{cfg: Config{Gain: 1.0, LowHz: 25, HighHz: 200}}
+	for i := range w.pasL {
+		w.pasL[i] = highPass(w.cfg.LowHz, SampleRate)
+		w.pasR[i] = highPass(w.cfg.LowHz, SampleRate)
+	}
+	w.pasL[2] = lowPass(w.cfg.HighHz, SampleRate)
+	w.pasR[2] = lowPass(w.cfg.HighHz, SampleRate)
+
+	// 60 Hz (in band) must survive; 5 kHz (out of band) must be attenuated.
+	peak := func(hz float64, gain uint8) float64 {
+		w.ampL.Store(uint32(gain))
+		w.ampR.Store(uint32(gain))
+		w.smoothL, w.smoothR = float64(gain)/255, float64(gain)/255
+		src := make([]float32, 480*2)
+		dst := make([]byte, 480*8)
+		var p float64
+		for block := 0; block < 40; block++ {
+			for i := 0; i < 480; i++ {
+				n := float64(block*480 + i)
+				v := float32(0.5 * math.Sin(2*math.Pi*hz*n/SampleRate))
+				src[i*2], src[i*2+1] = v, v
+			}
+			w.passBlock(dst, src, 480)
+			if block < 10 {
+				continue // let the filter settle before measuring
+			}
+			for i := 0; i < 480; i++ {
+				l := math.Abs(float64(int16(binary.LittleEndian.Uint16(dst[i*8+4:]))))
+				if l > p {
+					p = l
+				}
+			}
+		}
+		return p
+	}
+
+	inBand := peak(60, 255)
+	outBand := peak(5000, 255)
+	if inBand < 5000 {
+		t.Errorf("60 Hz peak = %.0f, want the in-band signal to pass", inBand)
+	}
+	if outBand > inBand*0.2 {
+		t.Errorf("5 kHz peak = %.0f, want it filtered out (in-band %.0f)", outBand, inBand)
+	}
+
+	// Gain must scale the output.
+	quiet := peak(60, 40)
+	if quiet >= inBand*0.5 {
+		t.Errorf("gain 40 peak = %.0f should be well below full-scale %.0f", quiet, inBand)
 	}
 }

@@ -1,0 +1,62 @@
+# BeamNG.drive / Live for Speed —— OutGauge 遥测
+#
+# BeamNG：Options → Other → OutGauge
+#     Enable OutGauge = 开
+#     OutGauge IP     = 127.0.0.1
+#     OutGauge Port   = 4444
+#     OutGauge Mode   = 1（公制）
+#
+# LFS：Misc → OutGauge 也走 4444。
+#
+# OutGauge 不带"最大转速"，所以 rpm 需要按车型给一个 max_rpm（默认 8000）。
+name: beamng
+title: BeamNG.drive、Live for Speed（OutGauge 4444）
+description: |
+  OutGauge 协议：油门/离合/刹车是浮点 0..1，速度单位 m/s。
+  刹车 → L2，油门 → R2，锁死无法直接得到，用"刹车很大 + 速度骤降"近似。
+
+source:
+  type: udp
+  listen: "0.0.0.0:4444"
+  decoder: outgauge
+  max_rpm: 7500
+  rate_hz: 60
+
+safety:
+  signal_ttl: 500ms
+  release: 300ms
+
+rules:
+  - name: l2-brake
+    when: 'has("brake")'
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(18 + 237 * brake, 0, 255)"
+
+  - name: r2-throttle
+    when: 'has("throttle")'
+    target: r2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(8 + 92 * throttle, 0, 255)"
+
+  # 高转速时给 R2 一点"发动机颗粒感"
+  - name: rpm-rumble
+    when: "rpm > 0.75"
+    target: rumble_right
+    priority: 20
+    value: "clamp(90 * (rpm - 0.75) / 0.25, 0, 255)"
+    modulate: { type: sine, hz: 40, depth: 0.5 }
+
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(255 * brake, 0, 255)"
+      g: "clamp(255 * throttle, 0, 255)"
+      b: "20"

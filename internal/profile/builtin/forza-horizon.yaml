@@ -1,0 +1,81 @@
+# 极限竞速：地平线 4 / 5、Forza Motorsport 7 / 2023 —— 原生 UDP 遥测
+#
+# 游戏内设置（必须先做，否则改这个 profile 也没用）：
+#   设置 → HUD 与游戏玩法 → Data Out
+#     Data Out        = 开
+#     IP 地址          = 运行 ds5d 的这台机器的 IP
+#     端口             = 5300
+#     数据输出格式      = Dash        ← 必须是 Dash
+#
+# 为什么必须选 Dash：Sled 格式只有 232 字节，不含油门/刹车/速度/挡位；
+# 只有 Dash（311 字节）才有 accel/brake/speed/gear 字段。
+#
+# 验证：`ds5d -dry-run -profile forza-horizon -trace`，
+# 进游戏踩油门应看到 throttle 变化；没反应就检查防火墙与 IP。
+name: forza-horizon
+title: 极限竞速 地平线 4/5、Forza Motorsport（UDP 5300）
+description: |
+  原生 UDP 遥测（Data Out / Dash 格式）。刹车 → L2 阻力，油门 → R2 阻力，
+  打滑 → 左马达，车轮锁死 → 右马达脉冲，路肩/振动带 → 左马达轻震。
+
+source:
+  type: udp
+  listen: "0.0.0.0:5300"
+  decoder: forza
+  rate_hz: 60
+
+safety:
+  signal_ttl: 500ms
+  release: 300ms
+
+rules:
+  # ---- 刹车 → L2 持续阻力 ----------------------------------------------
+  - name: l2-brake
+    when: 'has("brake")'
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(18 + 237 * brake, 0, 255)"
+
+  # ---- 油门 → R2 持续阻力（带一点速度感） ------------------------------
+  - name: r2-throttle
+    when: 'has("throttle")'
+    target: r2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(8 + 92 * throttle + 15 * clamp(speed / 240 - 0.4, 0, 1), 0, 255)"
+
+  # ---- 车轮打滑 / 路肩 → 左马达 ----------------------------------------
+  - name: slip-rumble
+    when: "slip > 0.05 || custom0 > 0"
+    target: rumble_left
+    priority: 20
+    value: "clamp(200 * slip + 60 * custom0, 0, 255)"
+
+  # ---- 车轮锁死 → 右马达 14Hz 脉冲（Forza 没有 ABS 通道） --------------
+  - name: lockup-rumble
+    when: "lockup > 0.1"
+    target: rumble_right
+    priority: 30
+    value: "clamp(180 * lockup, 0, 255)"
+    modulate: { type: sine, hz: 14, depth: 0.85 }
+
+  # ---- 路面粗糙度（越野/草地）→ 左马达轻震 -----------------------------
+  - name: surface-rumble
+    when: "surface > 0.1"
+    target: rumble_left
+    priority: 15
+    value: "clamp(140 * surface, 0, 255)"
+
+  # ---- 灯条：刹车红、油门绿 --------------------------------------------
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(255 * brake, 0, 255)"
+      g: "clamp(255 * throttle, 0, 255)"
+      b: "20"

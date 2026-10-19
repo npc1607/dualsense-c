@@ -1,0 +1,83 @@
+# 尘埃拉力 / EA WRC / DiRT 4 —— Codemasters UDP 20777（校准模板）
+#
+# 这几个游戏确实自带遥测：游戏内 Options → UDP Telemetry = On，
+# 默认发到 127.0.0.1:20777（有的版本在 gameplay 设置里能改 IP/端口）。
+#
+# 但 Codemasters 的包结构在 DR1 → DR2 → DiRT 4 → EA WRC 之间改过多次，
+# 且同一版本会交替发送多个不同长度的包。**本仓库不内置猜测的偏移**，
+# 因为错误的偏移只会让扳机乱抖，比不支持更难排查。
+#
+# 校准流程（3 分钟）：
+#   1. ds5ctl sniff -listen :20777
+#      进赛段，踩死油门再松开；观察出现几种包长、哪个字节随油门变化
+#   2. 复制下面注释里的 fields 块，把 off 改成实测偏移
+#   3. 用 derived 把四轮/组合量折算成标准信号
+#   4. ds5d -dry-run -profile dirt-family -trace  验证数值范围 0..1
+#   5. 去掉 -dry-run 正常使用
+#
+# 提示：Codemasters 的输入包用 float32 表示油门/刹车/离合（0..1），
+# 速度多为 m/s 的 float32；先按 f32 找"0.0 ~ 1.0 连续变化"的 4 字节最容易命中。
+name: dirt-family
+title: 尘埃拉力 / EA WRC / DiRT 4（UDP 20777，需校准偏移）
+description: |
+  Codemasters 系列遥测模板。默认不启用任何字段（否则会用错误偏移乱驱动扳机），
+  请按注释里的步骤用 ds5ctl sniff 现场校准后填入 fields。
+
+source:
+  type: udp
+  listen: "0.0.0.0:20777"
+  decoder: fields
+  rate_hz: 60
+  dump: true
+
+  # ---- 校准后取消注释并按实际偏移修改 ---------------------------------
+  # fields:
+  #   throttle: { off: 116, fmt: f32 }
+  #   brake:    { off: 120, fmt: f32 }
+  #   clutch:   { off: 124, fmt: f32 }
+  #   steer:    { off: 128, fmt: f32 }
+  #   speed:    { off: 8,   fmt: f32, scale: 3.6 }   # m/s → km/h
+  #   gear:     { off: 132, fmt: u8 }
+  #   slip_fl:  { off: 136, fmt: f32 }
+  #   slip_fr:  { off: 140, fmt: f32 }
+  #   slip_rl:  { off: 144, fmt: f32 }
+  #   slip_rr:  { off: 148, fmt: f32 }
+  # derived:
+  #   slip: "max(max(abs(slip_fl), abs(slip_fr)), max(abs(slip_rl), abs(slip_rr)))"
+
+safety:
+  signal_ttl: 500ms
+  release: 300ms
+
+rules:
+  - name: l2-brake
+    when: 'has("brake")'
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(18 + 237 * brake, 0, 255)"
+
+  - name: r2-throttle
+    when: 'has("throttle")'
+    target: r2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(8 + 92 * throttle, 0, 255)"
+
+  - name: slip-rumble
+    when: 'has("slip") && slip > 0.08'
+    target: rumble_left
+    priority: 20
+    value: "clamp(200 * slip, 0, 255)"
+
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(255 * brake, 0, 255)"
+      g: "clamp(255 * throttle, 0, 255)"
+      b: "20"

@@ -1,0 +1,87 @@
+# FPS / 射击游戏的输入驱动 profile。
+#
+# 不依赖任何游戏遥测：只读 DS5 自身的扳机行程与按键，
+# 因此任何游戏（Steam / Proton / 原生）都能用。
+#
+# 手感设计：
+#   L2：前 55% 行程渐进阻力（瞄准时手指有"压住"的实感），
+#       越过 55% 后阻力消失，形成"挡墙被打穿"的开火手感。
+#   R2：全程渐进阻力；到 85%（r2_full）瞬间触发右马达后坐力脉冲。
+#
+# 调参建议：用 `ds5d -profile fps -trace` 观察实时信号，
+# 再改 strength/force 直到阻力符合手感。strength 控"行程上的分段位置感"，
+# force 控"整体硬度"。
+name: fps
+title: 射击游戏（输入驱动，无需游戏遥测）
+description: |
+  L2 半按形成瞄准挡墙，越过挡墙释放全行程；R2 渐进阻力 + 开火瞬间后坐力。
+  只依赖手柄自身读数，适用于任何 FPS / TPS。
+
+source:
+  type: trigger
+  rate_hz: 125
+
+shape:
+  l2: { deadzone: 0.02 }
+  r2: { deadzone: 0.02 }
+
+safety:
+  signal_ttl: 600ms
+  release: 180ms
+  status_lightbar: false
+
+rules:
+  # ---- L2 瞄准：渐进阻力 ------------------------------------------------
+  - name: l2-aim
+    when: "l2 > 0.02 && l2 < 0.55"
+    target: l2
+    effect: feedback
+    priority: 10
+    params:
+      start: "0"
+      strength: "150"
+      force: "120"
+
+  # ---- R2 开火：渐进阻力 ------------------------------------------------
+  - name: r2-fire-tension
+    when: "r2 > 0.02 && r2 < 0.85"
+    target: r2
+    effect: feedback
+    priority: 10
+    params:
+      start: "0"
+      strength: "clamp(70 + 120 * r2, 0, 255)"
+      force: "95"
+
+  # ---- R2 全行程：泄压，模拟扳机"扣到底" -------------------------------
+  - name: r2-break
+    when: "r2 >= 0.85"
+    target: r2
+    effect: off
+    priority: 20
+
+  # ---- 开火瞬间：右马达后坐力脉冲 --------------------------------------
+  - name: recoil
+    when: 'pressed("r2_full")'
+    target: rumble_right
+    priority: 50
+    hold: 130ms
+    value: "230"
+    modulate: { type: sine, hz: 24, depth: 0.65 }
+
+  # ---- 开火瞬间：左马达低频"砰" -----------------------------------------
+  - name: recoil-body
+    when: 'pressed("r2_full")'
+    target: rumble_left
+    priority: 50
+    hold: 90ms
+    value: "170"
+
+  # ---- 灯条：随 R2 行程变亮 ---------------------------------------------
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "0"
+      g: "clamp(60 + 195 * r2, 0, 255)"
+      b: "clamp(120 * (1 - r2), 0, 255)"

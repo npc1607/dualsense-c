@@ -1,0 +1,6 @@
+# DualSense / DualSense Edge — allow user access to hidraw for adaptive triggers.
+# Install to /etc/udev/rules.d/, then:
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# and replug the controller once.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0ce6", MODE="0660", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0df2", MODE="0660", TAG+="uaccess"

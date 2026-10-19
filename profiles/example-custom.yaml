@@ -1,0 +1,84 @@
+# 自定义 profile 模板：复制到 ~/.config/dualsense-c/ 或任意目录，
+# 用 `ds5d -profiles <dir> -profile my-game` 加载。
+#
+# 三件事决定手感：source（拿到什么信号）、when（什么时候生效）、params（多硬）。
+
+name: my-game
+title: 我的游戏
+description: |
+  说明这个 profile 的意图、需要游戏里做哪些设置、手感思路。
+
+# ---------------------------------------------------------------- source ----
+# A. 输入驱动（任何游戏，不需要游戏配合）
+source:
+  type: trigger
+  rate_hz: 125
+
+# B. 原生 UDP 遥测
+# source:
+#   type: udp
+#   listen: "0.0.0.0:5300"
+#   decoder: forza
+
+# C. 任意 UDP 协议的声明式字段表（先用 `ds5ctl sniff -listen :20777` 校准）
+# source:
+#   type: udp
+#   listen: "0.0.0.0:20777"
+#   decoder: fields
+#   fields:
+#     throttle: { off: 116, fmt: f32 }
+#     brake:    { off: 120, fmt: f32 }
+#     speed:    { off: 8,   fmt: f32, scale: 3.6 }
+#   derived:
+#     pedal: "max(throttle, brake)"
+
+# ----------------------------------------------------------------- shape ----
+shape:
+  l2: { deadzone: 0.02 }
+  r2: { deadzone: 0.02 }
+
+# ---------------------------------------------------------------- safety ----
+safety:
+  signal_ttl: 500ms
+  release: 250ms
+  status_lightbar: false
+
+# ----------------------------------------------------------------- rules ----
+rules:
+  # 半按挡墙：只有前半程有阻力，越过之后放行
+  - name: l2-wall
+    when: "l2 > 0.02 && l2 < 0.55"
+    target: l2
+    effect: feedback
+    priority: 10
+    params:
+      start: "0"
+      strength: "150"
+      force: "120"
+
+  - name: r2-tension
+    when: "r2 > 0.02"
+    target: r2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(20 + 120 * r2, 0, 255)"
+
+  # 一次性脉冲：按住 R2 到 85% 触发，锁存 120ms，正弦调幅
+  - name: kick
+    when: 'pressed("r2_full")'
+    target: rumble_right
+    priority: 50
+    hold: 120ms
+    value: "210"
+    modulate: { type: sine, hz: 22, depth: 0.6 }
+
+  # 灯条：任何时刻都生效（没有 when）
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "0"
+      g: "clamp(60 + 195 * r2, 0, 255)"
+      b: "clamp(120 * (1 - r2), 0, 255)"

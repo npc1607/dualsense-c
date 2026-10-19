@@ -1,0 +1,67 @@
+# 通用 profile：任何游戏都能用的双段扳机。
+#
+# 目标不是模拟某个具体机制，而是让扳机"有段落感"：
+# 半按处有一道软墙，越过之后阻力降低。射击、驾驶、动作游戏都受用。
+name: generic
+title: 通用双段扳机（任何游戏）
+description: |
+  L2 / R2 在半按位置形成一道软墙，越过软墙后阻力下降。
+  不依赖游戏遥测，也不做后坐力，适合作为所有游戏的默认配置。
+
+source:
+  type: trigger
+  rate_hz: 125
+
+shape:
+  l2: { deadzone: 0.02 }
+  r2: { deadzone: 0.02 }
+
+safety:
+  signal_ttl: 600ms
+  release: 200ms
+  status_lightbar: false
+
+rules:
+  - name: l2-stage1
+    when: "l2 > 0.02 && l2 < 0.5"
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "1"
+      force: "clamp(40 + 180 * l2, 0, 255)"
+
+  - name: l2-stage2
+    when: "l2 >= 0.5 && l2 < 0.9"
+    target: l2
+    effect: section
+    priority: 20
+    params:
+      start: "1"
+      end: "9"
+
+  - name: r2-stage1
+    when: "r2 > 0.02 && r2 < 0.5"
+    target: r2
+    effect: rigid
+    priority: 10
+    params:
+      start: "1"
+      force: "clamp(30 + 150 * r2, 0, 255)"
+
+  - name: r2-stage2
+    when: "r2 >= 0.5 && r2 < 0.9"
+    target: r2
+    effect: section
+    priority: 20
+    params:
+      start: "1"
+      end: "9"
+
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "0"
+      g: "clamp(255 * (r2 - l2), 0, 255)"
+      b: "clamp(255 * (l2 - r2), 0, 255)"

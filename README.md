@@ -170,6 +170,9 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 | **高清音圈触感 (Voice-Coil)** | ✅ 可用（Linux 实测） | `sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM（`haptic_left/haptic_right`）。**前提**：HID 报告空闲时不得声明 `COMPATIBLE_VIBRATION/HAPTICS_SELECT`，否则执行器被锁在 HID 引擎上、音频流被忽略 |
 | **手柄内置扬声器** | ⚠️ 通路已验证，无专用 sink | Ch1/2 实测可出声；任何能写 PipeWire sink 的工具都能用，本项目未封装 |
 
+> 📖 **Wiki**：分主题的教程与排错手册 —— <https://github.com/npc1607/dualsense-c/wiki>
+> （源文件在 `wiki/`，`./scripts/publish-wiki.sh` 一键发布）
+>
 > 音频 AI 的接入方式、推理流程、HD 触感触发路径与调优见
 > 👉 **[音频 AI 接入与 HD 触感（含流程图）](docs/audio-ai-haptics.md)**
 >

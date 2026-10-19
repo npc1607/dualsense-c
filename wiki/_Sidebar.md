@@ -1,0 +1,15 @@
+**dualsense-c**
+
+- [首页](Home)
+- [快速开始](Getting-Started)
+- [Profile 编写](Profiles)
+- [标准信号](Signals)
+- [扳机效果](Triggers)
+- [HD 触感（音圈）](HD-Haptics)
+- [音频 AI](Audio-AI)
+- [力反馈镜像](FFB-and-Virtual-Pad)
+- [AC / ACC / AC Rally](ACR-AC-ACC)
+- [Far Far West 实例](Far-Far-West)
+- [平台支持](Platform-Support)
+- [故障排查](Troubleshooting)
+- [开发与架构](Development)

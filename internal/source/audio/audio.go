@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/npc1607/dualsense-c/internal/audioai"
 	"github.com/npc1607/dualsense-c/internal/profile"
 	"github.com/npc1607/dualsense-c/internal/signal"
 	"github.com/npc1607/dualsense-c/internal/source"
@@ -38,7 +39,7 @@ const (
 	// pw-record accepts --target but silently ignores it and records the default
 	// node instead, which makes the capture look like permanent silence.
 	// Verified on hardware: parec honours --device, pw-record did not.
-	defCommand  = "parec --device={target} --rate={rate} --channels={channels} --format={format} --raw"
+	defCommand  = "parec --device={target} --rate={rate} --channels={channels} --format={format} --latency-msec=20 --process-time-msec=2 --raw"
 	defRate     = 24000
 	defChannels = 2
 	// parec spells formats as PulseAudio names (float32le), not PipeWire's f32.
@@ -66,6 +67,26 @@ type Source struct {
 	bassL, bassH cascade
 	midL, midH   cascade
 	log          *log.Logger
+
+	// Optional in-process classifier (YAMNet via ONNX Runtime).
+	clf      *audioai.Classifier
+	aiWindow int       // samples per classification window (16000 = 1s)
+	aiHop    int       // samples between classifications
+	aiRing   []float32 // rolling window
+	aiCh     chan map[string]float32
+	winCh    chan []float32
+	aiSent   int // samples accumulated since the last window was queued
+	aiDrop   int // windows dropped because the engine was busy
+	aiDebug  bool
+	envDebug bool
+	envPeak  [3]float32 // bass, mid, loudness peaks since the last report
+	rawPeak  float32    // |sample| peak before filtering
+	rmsPeak  float32    // loudest block RMS since the last report
+	lastBass float32
+	lastMid  float32
+	lastLoud float32
+	prevLoud float32
+	envLast  time.Time
 }
 
 // New builds the source from the profile's `source:` block.
@@ -124,6 +145,31 @@ func New(cfg profile.Source, deps source.Deps) (source.Source, error) {
 	if rate <= 0 || channels <= 0 {
 		return nil, errors.New("audio source: rate and channels must be positive")
 	}
+
+	// YAMNet consumes 16 kHz mono, so the classifier forces that rate; asking to
+	// capture at anything else silently breaks it (resampling is not wired up).
+	modelPath := getS("model", "")
+	classMap := getS("class_map", "")
+	var clf *audioai.Classifier
+	if modelPath != "" {
+		if channels != 1 && channels != 2 {
+			return nil, errors.New("audio source: model requires --channels 1 or 2")
+		}
+		if rate != 16000 {
+			return nil, fmt.Errorf("audio source: model requires rate 16000 (YAMNet input); got %d", rate)
+		}
+		if classMap == "" {
+			classMap = "models/yamnet_class_map.csv"
+		}
+		engine, err := audioai.Open(modelPath, classMap, getI("threads", 2))
+		if err != nil {
+			return nil, fmt.Errorf("audio source: %w", err)
+		}
+		clf = engine
+		if deps.Logger != nil {
+			deps.Logger.Printf("audio: AI classifier loaded (%s)", modelPath)
+		}
+	}
 	format := getS("format", defFormat)
 
 	tmpl := getS("command", defCommand)
@@ -173,6 +219,34 @@ func New(cfg profile.Source, deps source.Deps) (source.Source, error) {
 	if s.emitHz <= 0 {
 		s.emitHz = defEmitHz
 	}
+	if clf != nil {
+		s.clf = clf
+		s.aiWindow = 16000
+		// YAMNet needs ~1 s of audio, so the window cannot shrink; the hop can.
+		// 100 ms gives 10 updates/s at ~5 ms inference cost each.
+		hopMS := getF("classify_ms", 250)
+		if hopMS < 100 {
+			hopMS = 100
+		}
+		s.aiHop = int(float64(rate) * hopMS / 1000)
+		if s.aiHop < 1 {
+			s.aiHop = 1
+		}
+		s.aiRing = make([]float32, 0, s.aiWindow)
+		s.aiDebug = false
+		if v, ok := cfg.Params["ai_debug"]; ok {
+			if b, ok := v.(bool); ok {
+				s.aiDebug = b
+			}
+		}
+		if v, ok := cfg.Params["env_debug"]; ok {
+			if b, ok := v.(bool); ok {
+				s.envDebug = b
+			}
+		}
+		s.aiCh = make(chan map[string]float32, 4)
+		s.winCh = make(chan []float32, 2)
+	}
 	s.bassEnv = newEnvFollower(attackMS, releaseMS, float64(rate))
 	s.midEnv = newEnvFollower(attackMS, releaseMS, float64(rate))
 	s.loudEnv = newEnvFollower(attackMS, releaseMS, float64(rate))
@@ -217,6 +291,9 @@ func (s *Source) Run(ctx context.Context, out chan<- signal.Frame) error {
 		return fmt.Errorf("audio: start %s: %w", s.cmd[0], err)
 	}
 	s.log.Printf("audio: capturing %s (%s %dch %d Hz)", strings.Join(s.cmd, " "), s.cmd[0], s.channels, s.rate)
+	if s.clf != nil {
+		go s.classifyLoop(ctx)
+	}
 
 	// Surface the capture tool's diagnostics instead of swallowing them.
 	go func() {
@@ -250,6 +327,95 @@ func (s *Source) Run(ctx context.Context, out chan<- signal.Frame) error {
 // loud value frozen downstream.
 const idleAfter = 80 * time.Millisecond
 
+// classifyLoop runs the model off the capture goroutine: inference takes a few
+// milliseconds and must not stall the audio reader.
+func (s *Source) classifyLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			if s.clf != nil {
+				_ = s.clf.Close()
+			}
+			return
+		case win := <-s.winCh:
+			res, err := s.clf.Signals(win)
+			if err != nil {
+				s.log.Printf("audio: classify: %v", err)
+				continue
+			}
+			if s.aiDebug {
+				scores, err := s.clf.RawScores(win)
+				if err == nil {
+					top := s.clf.TopN(scores, 3)
+					parts := make([]string, 0, len(top))
+					for _, t := range top {
+						parts = append(parts, fmt.Sprintf("%s=%.2f", t.Name, t.Score))
+					}
+					s.log.Printf("audio: ai %s", strings.Join(parts, " "))
+				}
+			}
+			// Keep only the newest result; the rules engine reads at 60 Hz while
+			// inference runs at ~2 Hz.
+			for {
+				select {
+				case <-s.aiCh:
+					continue
+				default:
+				}
+				break
+			}
+			select {
+			case s.aiCh <- res:
+			default:
+			}
+		}
+	}
+}
+
+// latestAI returns the most recent classification, if any.
+func (s *Source) latestAI() map[string]float32 {
+	if s.clf == nil {
+		return nil
+	}
+	var out map[string]float32
+	for {
+		select {
+		case v := <-s.aiCh:
+			out = v
+			continue
+		default:
+		}
+		return out
+	}
+}
+
+// feedAI appends a block to the rolling window and queues a classification when
+// a full window is available.
+func (s *Source) feedAI(block []float32) {
+	if s.clf == nil {
+		return
+	}
+	s.aiRing = append(s.aiRing, block...)
+	if len(s.aiRing) < s.aiWindow {
+		return
+	}
+	s.aiSent += len(block)
+	if s.aiSent < s.aiHop {
+		return
+	}
+	s.aiSent = 0
+	win := make([]float32, s.aiWindow)
+	copy(win, s.aiRing[len(s.aiRing)-s.aiWindow:])
+	select {
+	case s.winCh <- win:
+	default:
+		s.aiDrop++
+	}
+	if len(s.aiRing) > 2*s.aiWindow {
+		s.aiRing = append(s.aiRing[:0], s.aiRing[len(s.aiRing)-s.aiWindow:]...)
+	}
+}
+
 // consume decodes f32le PCM, filters it into bands and emits envelope frames.
 //
 // Reads use a deadline slightly longer than one block so an idle sink (PipeWire
@@ -271,12 +437,41 @@ func (s *Source) consume(ctx context.Context, r io.Reader, out chan<- signal.Fra
 			return true
 		}
 		next = now.Add(emit)
+		vals := map[string]float32{
+			"bass":     s.lastBass,
+			"mid":      s.lastMid,
+			"loudness": s.lastLoud,
+		}
+		if s.envDebug {
+			if s.prevLoud < 0.08 && vals["loudness"] >= 0.08 {
+				s.log.Printf("audio: onset loudness=%.3f at=%s", vals["loudness"], now.Format("15:04:05.000"))
+			}
+			s.prevLoud = vals["loudness"]
+			if vals["bass"] > s.envPeak[0] {
+				s.envPeak[0] = vals["bass"]
+			}
+			if vals["mid"] > s.envPeak[1] {
+				s.envPeak[1] = vals["mid"]
+			}
+			if vals["loudness"] > s.envPeak[2] {
+				s.envPeak[2] = vals["loudness"]
+			}
+			if s.envLast.IsZero() {
+				s.envLast = now
+			} else if now.Sub(s.envLast) >= time.Second {
+				s.log.Printf("audio: env peak raw=%.3f rms=%.4f bass=%.3f mid=%.3f loudness=%.3f",
+					s.rawPeak, s.rmsPeak, s.envPeak[0], s.envPeak[1], s.envPeak[2])
+				s.rawPeak = 0
+				s.rmsPeak = 0
+				s.envPeak = [3]float32{}
+				s.envLast = now
+			}
+		}
+		for k, v := range s.latestAI() {
+			vals[k] = v
+		}
 		select {
-		case out <- signal.Frame{At: now, Values: map[string]float32{
-			"bass":     float32(s.bassEnv.y),
-			"mid":      float32(s.midEnv.y),
-			"loudness": float32(s.loudEnv.y),
-		}}:
+		case out <- signal.Frame{At: now, Values: vals}:
 			return true
 		case <-ctx.Done():
 			return false
@@ -306,6 +501,7 @@ func (s *Source) consume(ctx context.Context, r io.Reader, out chan<- signal.Fra
 					sample = append(sample, sum/float32(s.channels))
 				}
 				pending = pending[frames*frameBytes:]
+				s.feedAI(sample)
 				s.measure(sample)
 				if !flush() {
 					return nil
@@ -334,6 +530,9 @@ func (s *Source) consume(ctx context.Context, r io.Reader, out chan<- signal.Fra
 func (s *Source) measure(samples []float32) (bass, mid, loud float64) {
 	var bassSum, midSum, allSum float64
 	for _, x := range samples {
+		if a := math.Abs(float64(x)); a > float64(s.rawPeak) {
+			s.rawPeak = float32(a)
+		}
 		b := s.bassH.step(s.bassL.step(float64(x)))
 		m := s.midH.step(s.midL.step(float64(x)))
 		bassSum += b * b
@@ -341,6 +540,11 @@ func (s *Source) measure(samples []float32) (bass, mid, loud float64) {
 		allSum += float64(x) * float64(x)
 	}
 	n := float64(len(samples))
+	if n > 0 {
+		if rms := math.Sqrt(allSum / n); rms > float64(s.rmsPeak) {
+			s.rmsPeak = float32(rms)
+		}
+	}
 	if n == 0 {
 		// Still step the envelopes down so silence actually decays.
 		n = 1
@@ -349,6 +553,10 @@ func (s *Source) measure(samples []float32) (bass, mid, loud float64) {
 	bass = s.normalise(s.bassEnv.stepN(math.Sqrt(bassSum/n), steps))
 	mid = s.normalise(s.midEnv.stepN(math.Sqrt(midSum/n), steps))
 	loud = s.normalise(s.loudEnv.stepN(math.Sqrt(allSum/n), steps))
+	// Emit the *normalised* values: using env.y directly meant `gain` had no
+	// effect on the signals at all, which kept game audio stuck near the
+	// thresholds no matter how the profile was tuned.
+	s.lastBass, s.lastMid, s.lastLoud = float32(bass), float32(mid), float32(loud)
 	return bass, mid, loud
 }
 

@@ -51,7 +51,7 @@ type Config struct {
 // nothing. Naming the sink's own layout keeps the 4 channels byte-for-byte
 // aligned with the hardware, which is what puts our samples on the coils.
 const defaultCommand = "pacat --playback --device={target} --rate={rate} --channels={channels} " +
-	"--channel-map=front-left,front-right,rear-left,rear-right --format=s16le --raw"
+	"--channel-map=front-left,front-right,rear-left,rear-right --format=s16le --latency-msec=10 --process-time-msec=2 --raw"
 
 // Writer mixes a continuous 4-channel stream. Channels 1/2 are kept silent and
 // channels 3/4 carry the haptic waveform.
@@ -128,7 +128,7 @@ func (w *Writer) Set(left, right uint8) {
 // on a voice coil reads as a test signal, while two or three partials give the
 // kind of texture a kerb or a gravel surface actually has.
 func (w *Writer) Run(ctx context.Context) error {
-	const blockFrames = 240 // 5 ms
+	const blockFrames = 96 // 2 ms: smaller blocks cut the output path latency
 	buf := make([]byte, blockFrames*4*2)
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()

@@ -1,0 +1,156 @@
+name: release
+
+# First version: tag-driven releases.
+#   git tag v0.1.0 && git push origin v0.1.0
+# or run manually from the Actions tab and supply a tag.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "run 'gofmt -w' on:"; echo "$unformatted"; exit 1
+          fi
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./...
+      - name: cross-compile
+        run: |
+          for target in linux windows darwin; do
+            echo "== GOOS=$target"
+            GOOS=$target go build ./...
+          done
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          ldflags="-s -w -X main.version=${VERSION}"
+          pkg="ds5c-${GOOS}-${GOARCH}"
+          out="dist/${pkg}"
+          mkdir -p "$out"
+
+          suffix=""
+          [ "$GOOS" = windows ] && suffix=".exe"
+          go build -trimpath -ldflags "$ldflags" -o "$out/ds5d$suffix"   ./cmd/ds5d
+          go build -trimpath -ldflags "$ldflags" -o "$out/ds5ctl$suffix" ./cmd/ds5ctl
+
+          # The shared-memory bridge always targets Windows: it runs inside a
+          # Proton/Wine prefix next to the game, even on a Linux host.
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$ldflags" \
+            -o "$out/ds5bridge.exe" ./cmd/ds5bridge
+
+          cp README.md LICENSE "$out/"
+          cp -r profiles "$out/"
+          if [ "$GOOS" = linux ]; then
+            cp -r udev scripts "$out/"
+          fi
+
+      - name: package
+        run: |
+          set -euo pipefail
+          cd dist
+          pkg="ds5c-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = windows ]; then
+            zip -qr "${pkg}.zip" "$pkg"
+            rm -rf "$pkg"
+            sha256sum "${pkg}.zip" > "${pkg}.zip.sha256"
+          else
+            tar -czf "${pkg}.tar.gz" "$pkg"
+            rm -rf "$pkg"
+            sha256sum "${pkg}.tar.gz" > "${pkg}.tar.gz.sha256"
+          fi
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          cat ./*.sha256 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ env.VERSION }}
+        run: |
+          set -euo pipefail
+          cd dist
+          shopt -s nullglob
+          files=()
+          for f in ./*.tar.gz ./*.zip SHA256SUMS; do files+=("$f"); done
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no artifacts found"; exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "release $TAG exists, uploading assets (clobber)"
+            gh release upload "$TAG" --repo "$REPO" --clobber "${files[@]}"
+          else
+            gh release create "$TAG" --repo "$REPO" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --generate-notes \
+              "${files[@]}"
+          fi

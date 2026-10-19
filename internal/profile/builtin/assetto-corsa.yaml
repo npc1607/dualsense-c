@@ -1,0 +1,96 @@
+# Assetto Corsa / ACC / Assetto Corsa Rally —— 共享内存 + Proton 桥
+#
+# 链路：
+#   游戏（Proton 内的 Windows 进程）→ acpmf_physics 共享内存
+#     → ds5bridge.exe（同一 Proton 前缀内运行）→ UDP 127.0.0.1:9999
+#     → ds5d（Linux 原生）→ DualSense
+#
+# 使用步骤：
+#   1) make build bridge                        # 编译 ds5d 与 Windows 桥
+#   2) ./bin/ds5d -profile assetto-corsa &      # 先起守护进程（会等数据）
+#   3) ./scripts/launch-bridge.sh <steam-appid>  # 把桥塞进游戏前缀
+#   4) 启动游戏，进赛道
+#
+#   Steam AppID：Assetto Corsa = 244210
+#                ACC            = 805550
+#                AC Rally       = 3917090
+#
+# 偏移量与 acr-dualsense 项目在真实游戏中验证过的 `SPageFilePhysics` 一致
+# （见 internal/bridge/layout.go）。
+name: assetto-corsa
+title: Assetto Corsa / ACC / AC Rally（共享内存桥，UDP 9999）
+description: |
+  通过 Proton 前缀内的 ds5bridge.exe 读取 acpmf_physics：
+  刹车 → L2 阻力，油门 → R2 阻力，四轮打滑 → 左马达，
+  ABS 介入 → 右马达 14Hz 脉冲，TC 介入 → 右马达持续轻震，
+  高转速 → R2 细颗粒感（custom0 为原始转速）。
+
+source:
+  type: udp
+  listen: "127.0.0.1:9999"
+  decoder: acshm
+  rate_hz: 60
+
+safety:
+  signal_ttl: 500ms
+  release: 300ms
+
+rules:
+  # ---- 刹车 → L2 持续阻力 ----------------------------------------------
+  - name: l2-brake
+    when: 'has("brake")'
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(18 + 237 * brake, 0, 255)"
+
+  # ---- 油门 → R2 持续阻力 ----------------------------------------------
+  - name: r2-throttle
+    when: 'has("throttle")'
+    target: r2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(8 + 92 * throttle, 0, 255)"
+
+  # ---- 车轮打滑 → 左马达 -----------------------------------------------
+  - name: slip-rumble
+    when: "slip > 0.08"
+    target: rumble_left
+    priority: 20
+    value: "clamp(200 * slip, 0, 255)"
+
+  # ---- ABS 介入 → 右马达脉冲 -------------------------------------------
+  - name: abs-pulse
+    when: "abs > 0.05"
+    target: rumble_right
+    priority: 30
+    value: "clamp(180 * abs, 0, 255)"
+    modulate: { type: sine, hz: 14, depth: 0.85 }
+
+  # ---- TC 介入 → 右马达持续轻震 ----------------------------------------
+  - name: tc-rumble
+    when: "tc > 0.05"
+    target: rumble_right
+    priority: 25
+    value: "clamp(120 * tc, 0, 255)"
+
+  # ---- 高转速 → R2 颗粒感（custom0 = 原始 rpm） ------------------------
+  - name: engine-grain
+    when: "custom0 > 5500"
+    target: rumble_right
+    priority: 15
+    value: "clamp(80 * (custom0 - 5500) / 2500, 0, 255)"
+    modulate: { type: sine, hz: 45, depth: 0.5 }
+
+  # ---- 灯条：刹车红、油门绿 --------------------------------------------
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(255 * brake, 0, 255)"
+      g: "clamp(255 * throttle, 0, 255)"
+      b: "20"

@@ -25,6 +25,9 @@ import (
 	_ "github.com/npc1607/dualsense-c/internal/source/all"
 )
 
+// version is injected at build time (-X main.version=...).
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -46,6 +49,8 @@ func main() {
 		err = cmdWatch(os.Args[2:])
 	case "sniff":
 		err = cmdSniff(os.Args[2:])
+	case "version", "-version", "--version":
+		fmt.Printf("ds5ctl %s\n", version)
 	default:
 		usage()
 		os.Exit(2)
@@ -66,6 +71,7 @@ func usage() {
   bench      cycle every trigger effect so you can pick the right one
   watch      print decoded input reports (calibrates button bits)
   sniff      hexdump incoming game telemetry (calibrates UDP offsets)
+  version    print the build version
 `)
 }
 

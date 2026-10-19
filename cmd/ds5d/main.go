@@ -26,6 +26,9 @@ import (
 	_ "github.com/npc1607/dualsense-c/internal/source/all"
 )
 
+// version is injected at build time (-X main.version=...).
+var version = "dev"
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatalf("ds5d: %v", err)
@@ -42,8 +45,14 @@ func run() error {
 		dryRun      = flag.Bool("dry-run", false, "do not open a controller; print frames instead")
 		trace       = flag.Bool("trace", false, "log signal values twice per second")
 		list        = flag.Bool("list", false, "list profiles and exit")
+		showVer     = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
+
+	if *showVer {
+		fmt.Printf("ds5d %s\n", version)
+		return nil
+	}
 
 	logger := log.New(log.Writer(), "ds5d: ", log.LstdFlags)
 

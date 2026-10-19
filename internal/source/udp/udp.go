@@ -164,8 +164,11 @@ func newDecoder(name string, params map[string]any, logger *log.Logger) (decoder
 		return newDirtDecoder(params, logger)
 	case "fields":
 		return newFieldsDecoder(params, logger)
+	case "acshm", "bridge", "ac", "acc", "acr":
+		// Assetto Corsa / ACC / AC Rally via cmd/ds5bridge (shared memory).
+		return &bridgeDecoder{}, nil
 	}
-	return nil, fmt.Errorf("udp source: unknown decoder %q (use forza, outgauge, dirt, fields or auto)", name)
+	return nil, fmt.Errorf("udp source: unknown decoder %q (use forza, outgauge, dirt, acshm, fields or auto)", name)
 }
 
 // baseDecoder carries the shared length guard.

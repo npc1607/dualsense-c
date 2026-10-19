@@ -4,6 +4,9 @@ import (
 	"encoding/binary"
 	"log"
 	"math"
+
+	"github.com/npc1607/dualsense-c/internal/bridge"
+	"github.com/npc1607/dualsense-c/internal/signal"
 )
 
 // ---------------------------------------------------------------- Forza -----
@@ -163,6 +166,33 @@ func (d *dirtDecoder) Decode(b []byte) (map[string]float32, bool) {
 		return nil, false
 	}
 	return d.fields.Decode(b)
+}
+
+// ------------------------------------------------- shared-memory bridge -----
+
+// bridgeDecoder consumes packets from cmd/ds5bridge, the helper that runs
+// inside a Proton/Wine prefix and reads a Windows shared-memory section
+// (Assetto Corsa, ACC, Assetto Corsa Rally, and any other title whose layout
+// fits the same page).
+//
+// The datagram is self-describing: each field carries the id of a standard
+// signal, so the daemon needs no knowledge of the game's offsets.
+type bridgeDecoder struct{}
+
+func (d *bridgeDecoder) Name() string { return "acshm" }
+
+func (d *bridgeDecoder) Decode(b []byte) (map[string]float32, bool) {
+	fields, err := bridge.Decode(b)
+	if err != nil {
+		return nil, false
+	}
+	out := make(map[string]float32, len(fields))
+	for _, f := range fields {
+		if name := signal.Name(f.ID); name != "" {
+			out[name] = f.Value
+		}
+	}
+	return out, len(out) > 0
 }
 
 // ------------------------------------------------------------- helpers -----

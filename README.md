@@ -4,6 +4,7 @@
 
 - **射击游戏（任意）**：不依赖游戏支持，读手柄自身的扳机行程，做「瞄准挡墙 + 开火后坐力」
 - **自带遥测的游戏**：Forza 地平线 4/5（UDP 5300）、BeamNG / Live for Speed（OutGauge 4444）、尘埃拉力 / EA WRC（UDP 20777，带校准工具）
+- **只有共享内存的游戏**：Assetto Corsa / ACC / AC Rally —— 交叉编译的 `ds5bridge.exe` 在 Proton 前缀内读 `acpmf_physics`，UDP 回传给原生守护进程
 - **纯 Go、无 CGO**：Linux 直接用 `/dev/hidraw`，Windows 走 HID 设备接口（代码已就位，未在真机验证）
 - **换游戏 = 改 YAML**：偏移、映射、手感参数都在 profile 里，不需要重新编译
 
@@ -106,6 +107,15 @@ L2 前 55% 行程有渐进阻力（瞄准"挡墙"），越过挡墙阻力消失�
 ./bin/ds5d -profile beamng            # BeamNG.drive、Live for Speed
 ```
 
+**只有共享内存的游戏（AC / ACC / AC Rally）**
+
+```bash
+make bridge                                   # 交叉编译 bin/ds5bridge.exe
+./bin/ds5d -profile assetto-corsa &           # 先起守护进程
+./scripts/launch-bridge.sh 805550             # 把桥塞进该 AppID 的 Proton 前缀
+# Steam AppID：AC 244210 | ACC 805550 | AC Rally 3917090
+```
+
 **不插手柄先验证配置**（profile 开发、CI 都能用）
 
 ```bash
@@ -139,7 +149,7 @@ nohup ./bin/ds5d -profile fps >> /tmp/ds5d.log 2>&1 &
 | Live for Speed | UDP **4444**（Misc → OutGauge） | `outgauge` | ✅ 内置 |
 | 尘埃拉力 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（Options → UDP Telemetry = On） | `dirt` + `fields` | ⚠️ 模板（偏移需现场校准，见下文） |
 | F1 22 / 23 / 24 | UDP 20777（格式随年份变化） | `fields` | ⚠️ 模板 |
-| Assetto Corsa / ACC / ACR | 共享内存 `acpmf_physics` | — | 🚧 未实现（Proton 前缀内需要一个 Windows 小助手，见 Roadmap） |
+| Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | ✅ 内置（偏移沿用 acr-dualsense 实测值） |
 | rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | 🚧 未实现 |
 | iRacing | SDK 内存映射 | — | 🚧 未实现 |
 
@@ -148,6 +158,55 @@ nohup ./bin/ds5d -profile fps >> /tmp/ds5d.log 2>&1 &
 ### C. 完全无遥测、也无需输入驱动
 
 兜底的音频 / 震动镜像方案见 [Roadmap](#roadmap)（`source/audio`、`source/ffb`）。
+
+---
+
+## 共享内存游戏（Assetto Corsa / ACC / AC Rally）
+
+这类游戏的遥测是 Windows 命名共享内存（`acpmf_physics`）：游戏进程在 Proton 前缀里写，原生 Linux 进程**看不到**。所以只有"读共享内存"这一小段必须待在前缀里，其余全部原生：
+
+```
+acc.exe (Proton) ──写──> acpmf_physics（Wine 共享内存）
+                              ▲
+ds5bridge.exe (Windows, 同前缀) ──读──┘ → UDP 127.0.0.1:9999
+                              ▼
+ds5d（Linux 原生）→ 规则 → DualSense
+```
+
+```bash
+make bridge                                  # 只交叉编译桥，纯 Go 不需要 mingw
+./bin/ds5d -profile assetto-corsa &          # 守护进程先起，会等数据
+./scripts/launch-bridge.sh 805550            # ACC；AC=244210, AC Rally=3917090
+# 或者手动：
+protontricks-launch --appid 805550 ./bin/ds5bridge.exe -layout acc -debug
+```
+
+桥的行为：
+
+- 每 2 秒重试一次共享内存，**可以先于游戏启动**
+- `packetId` 超过 2 秒不变 → 认为本局结束，自动重新打开映射（不用重启桥）
+- 数值不合理时打印 `layout mismatch?` 并跳过，不会把乱数送进扳机
+
+**没有游戏也想验证链路**（`tools/bridgesim` 模拟桥的输出）：
+
+```bash
+go run ./tools/bridgesim -port 9999          # 终端 A
+./bin/ds5d -dry-run -profile assetto-corsa -trace   # 终端 B
+```
+
+### 桥的线格式
+
+自描述，不是定长 6 通道：
+
+```
+0  magic   uint32  "DS5B" (0x42355344)
+4  version uint16  1
+6  count   uint8
+7  _       uint8
+8  fields[count] { id uint8, value float32 }   // id = internal/signal.Standard 的下标
+```
+
+新增字段只要改 `internal/bridge/layout.go`，守护进程侧无需改动。
 
 ---
 
@@ -165,6 +224,7 @@ nohup ./bin/ds5d -profile fps >> /tmp/ds5d.log 2>&1 &
 | `-dry-run` | 关 | 不开手柄，只打印帧（可在 macOS 上开发 profile） |
 | `-trace` | 关 | 每秒两次打印信号值 |
 | `-list` | 关 | 列出内置 profile 后退出 |
+| `-version` | 关 | 打印版本（release 构建时注入 tag） |
 
 ### `ds5ctl` —— 维护工具
 
@@ -177,6 +237,7 @@ nohup ./bin/ds5d -profile fps >> /tmp/ds5d.log 2>&1 &
 | `bench [-trigger l2\|r2\|both]` | 逐个播放 8 种扳机效果 |
 | `watch` | 打印解码后的输入报告（校准按键位表） |
 | `sniff -listen :20777` | 十六进制 dump 游戏遥测包（校准 UDP 偏移） |
+| `version` | 打印版本 |
 
 ---
 
@@ -370,7 +431,9 @@ bin/ds5d.exe -profile fps -trace
 ```
 cmd/ds5d/                 守护进程（profile → source → rules → sink）
 cmd/ds5ctl/               设备/配置/校准工具
+cmd/ds5bridge/            Windows 侧共享内存桥（在 Proton 前缀内运行）
 internal/
+  bridge/                 桥的线格式 + 共享内存布局（ac/acc/acr）
   hid/                    报告构造（USB/BT）、扳机效果库
   device/                 设备抽象 + hidraw(Linux) / HID(Windows) / stub(其它)
   input/                  DualSense 输入报告解析
@@ -381,9 +444,11 @@ internal/
   report/                 按传输方式选择报告格式
   source/                 Source 接口 + 注册表
     trigger/              输入驱动（任意游戏）
-    udp/                  原生遥测（forza / outgauge / dirt / fields）
+    udp/                  原生遥测（forza / outgauge / dirt / acshm / fields）
     sim/                  无设备脚本源（开发/测试）
 udev/70-dualsense.rules   免 root 访问 hidraw
+scripts/launch-bridge.sh  把桥塞进指定 AppID 的 Proton 前缀
+tools/bridgesim/          模拟桥输出（无游戏时验证链路）
 profiles/                 放你自己的 profile（用 -profiles 指定）
 ```
 
@@ -400,12 +465,31 @@ profiles/                 放你自己的 profile（用 -profiles 指定）
 
 ## Roadmap
 
-- [ ] **Assetto Corsa / ACC / ACR**：Proton 前缀内共享内存需要在 Windows 侧读，计划沿用 `acr-dualsense` 的做法（交叉编译小助手 + UDP 回传），复用本仓库的 `udp` 解码器
+- [x] **Assetto Corsa / ACC / AC Rally**：`cmd/ds5bridge`（Proton 前缀内）+ `acshm` 解码器
+- [ ] **rFactor 2 / LMU、ETS2 / ATS**：同一套桥，加新的共享内存布局（`internal/bridge/layout.go`）
+- [ ] **iRacing**：SDK 内存映射，布局同样走 `internal/bridge`
 - [ ] **`source/ffb`**：uinput 虚拟手柄镜像游戏的力反馈 → 「游戏在震多强」变成信号，覆盖无遥测的 FPS/动作游戏
 - [ ] **`source/audio`**：PipeWire 频谱包络兜底（枪声/爆炸驱动扳机微颤）
 - [ ] **Windows 真机验证**：蓝牙报告、OVERLAPPED 读、Steam Input 冲突
 - [ ] **焦点仲裁**：同时开多个 profile，按活动窗口自动切换
 - [ ] **`ds5d replay`**：录制/回放信号，做手感回归测试
+
+---
+
+## 发布（GitHub Actions）
+
+`.github/workflows/release.yml`：推 tag 即构建并发布。
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+- `verify`：gofmt / vet / test / 三平台交叉编译，任一失败则中止
+- `build`：矩阵 `linux-amd64`、`linux-arm64`、`windows-amd64`，产物含 `ds5d`、`ds5ctl`、**`ds5bridge.exe`**、`profiles/`、`README`、`LICENSE`、`udev/`、`scripts/`
+- 版本号通过 `-X main.version=<tag>` 注入，`ds5d -version` / `ds5ctl version` 可查
+- `release`：合并产物 → 生成 `SHA256SUMS` → `gh release create`（已存在则 `--clobber` 覆盖上传）
+- 也可以在 Actions 页面手动 `workflow_dispatch`，填一个 tag
 
 ---
 

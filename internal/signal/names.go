@@ -10,6 +10,7 @@ var Standard = []string{
 	// Vehicle telemetry (racing games, sims, ...)
 	"throttle", "brake", "clutch", "steer", "speed", "rpm", "gear",
 	"slip", "lockup", "abs", "tc", "rumble", "accel_g", "lat_g", "surface",
+	"slip_fl", "slip_fr", "slip_rl", "slip_rr",
 
 	// Controller state (input-driven profiles, works in every game)
 	"l2", "r2", "l2_full", "r2_full",
@@ -34,4 +35,23 @@ var standard = func() map[string]struct{} {
 func IsStandard(name string) bool {
 	_, ok := standard[name]
 	return ok
+}
+
+// ID returns the wire id of a signal name. The bridge sends ids instead of
+// strings, so both sides must be built from the same vocabulary.
+func ID(name string) (uint8, bool) {
+	for i, n := range Standard {
+		if n == name {
+			return uint8(i), true
+		}
+	}
+	return 0, false
+}
+
+// Name returns the signal name for a wire id, or "" if unknown.
+func Name(id uint8) string {
+	if int(id) < len(Standard) {
+		return Standard[id]
+	}
+	return ""
 }

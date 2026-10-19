@@ -60,6 +60,15 @@ make fmt        # gofmt
 
 ## 相关文档
 
-- [音频 AI 接入与 HD 触感](Audio-AI) · 仓库 `docs/audio-ai-haptics.md`
-- `docs/audio-haptics-and-ffb.md` —— 音圈与力反馈的设计与踩坑
-- `docs/hardware-capabilities.md` —— DS5 硬件能力与驱动边界
+**Wiki 内**
+
+- [音频 AI 接入与 HD 触感](Audio-AI)
+- [HD 触感（音圈）](HD-Haptics)
+- [力反馈镜像（虚拟手柄）](FFB-and-Virtual-Pad)
+- [故障排查](Troubleshooting)
+
+**仓库文档**（设计细节与真机数据）
+
+- [音频 AI 接入与 HD 触感：推理流程与调优](https://github.com/npc1607/dualsense-c/blob/main/docs/audio-ai-haptics.md)
+- [音频触感与力反馈镜像：设计与踩坑](https://github.com/npc1607/dualsense-c/blob/main/docs/audio-haptics-and-ffb.md)
+- [DS5 硬件能力、驱动边界与高清触感方案](https://github.com/npc1607/dualsense-c/blob/main/docs/hardware-capabilities.md)

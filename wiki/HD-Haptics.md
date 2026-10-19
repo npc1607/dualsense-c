@@ -72,4 +72,4 @@ pacat ... --channels=4   --channel-map=front-left,front-right,rear-left,rear-rig
 ./bin/ds5d -profile audio-haptics -trace
 ```
 
-详见 [音频 AI](Audio-AI) 与仓库文档 `docs/audio-haptics-and-ffb.md`。
+详见 [音频 AI](Audio-AI) 与仓库文档 [音频触感与力反馈镜像：设计与踩坑](https://github.com/npc1607/dualsense-c/blob/main/docs/audio-haptics-and-ffb.md)。

@@ -87,4 +87,4 @@ when: 'crossed("audio_gunshot", 0.30)'
 when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
 ```
 
-完整说明见仓库 `docs/audio-ai-haptics.md`（含流程图）。
+完整说明见仓库 [音频 AI 接入与 HD 触感（推理流程 + 流程图）](https://github.com/npc1607/dualsense-c/blob/main/docs/audio-ai-haptics.md)（含流程图）。

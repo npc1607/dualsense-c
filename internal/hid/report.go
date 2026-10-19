@@ -54,7 +54,25 @@ func Idle() Frame { return Frame{} }
 func BuildUSB(f Frame) []byte {
 	b := make([]byte, USBReportLen)
 	b[0] = usbReportID
-	b[offFlags0] = 0xFF // enable motors, triggers, audio, speaker
+	// valid_flag0 is an apply mask, so only claim what this frame actually sets.
+	//
+	//   bit0 COMPATIBLE_VIBRATION + bit1 HAPTICS_SELECT: "drive the actuators
+	//   from motor_left/motor_right". Claiming these with zero motors hands the
+	//   actuators to the HID rumble engine at amplitude 0, which makes the
+	//   firmware ignore the audio-streamed haptics on channels 3/4 — the reason
+	//   writing PCM to the coils appeared to do nothing.
+	//
+	//   bit2/bit3: left/right trigger effect blocks.
+	//
+	// Bits 4-7 (headphone/speaker/microphone volume, audio_control) must stay
+	// clear: enabling them with the zeroed payload bytes mutes the USB audio
+	// DAC entirely (verified on hardware — no sound at all until they were
+	// dropped).
+	flags0 := byte(0x04 | 0x08) // trigger effect blocks
+	if f.RumbleL != 0 || f.RumbleR != 0 {
+		flags0 |= 0x01 | 0x02
+	}
+	b[offFlags0] = flags0
 	b[offFlags1] = 0x01 | 0x02 | 0x04 | 0x10 | 0x40
 	b[offRumbleR] = f.RumbleR
 	b[offRumbleL] = f.RumbleL
@@ -66,6 +84,9 @@ func BuildUSB(f Frame) []byte {
 	// valid_flag2: lightbar control is always on; player-LED control is only
 	// enabled when the caller actually wants a pattern, because enabling it with
 	// a zero value would switch the default player indication off.
+	// bit1 LIGHTBAR_SETUP_CONTROL_ENABLE keeps the lightbar under our control;
+	// the remaining bit is the player-indicator enable (player LEDs are also
+	// gated by valid_flag1 bit4).
 	flags2 := byte(0x03)
 	if f.PlayerLEDs != 0 {
 		flags2 |= 0x04

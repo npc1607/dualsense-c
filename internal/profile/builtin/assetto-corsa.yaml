@@ -40,6 +40,15 @@ safety:
   signal_ttl: 500ms
   release: 300ms
 
+# 音圈触感（USB 音频 Ch3/4）。HID 马达只能表达「振幅 + 一个调幅频率」，
+# 路肩那种细密颗粒必须靠音圈。实测（fw 0x0110002a）可用 —— 前提是
+# HID 报告在空闲时不要声明 COMPATIBLE_VIBRATION/HAPTICS_SELECT，
+# 否则执行器被锁在 HID 引擎上、幅度 0，音频流会被忽略。
+haptics:
+  target: auto
+  carrier_hz: 60
+  gain: 0.9
+
 rules:
   # ---- 刹车 → L2 持续阻力 ----------------------------------------------
   - name: l2-brake
@@ -181,6 +190,42 @@ rules:
     hold: 130ms
     value: "clamp(140 + 35 * (absf(accel_g) - 1.5), 0, 255)"
     modulate: { type: square, hz: 23, depth: 0.55 }
+
+  # ---- 音圈：细颗粒纹理（HID 马达给体感，音圈给细节） ------------------
+  - name: coil-texture-left
+    when: 'has("accel_g") && speed > 5'
+    target: haptic_left
+    priority: 18
+    value: "clamp(8 + 420 * absf(accel_g), 0, 170)"
+
+  - name: coil-texture-right
+    when: 'has("accel_g") && speed > 5'
+    target: haptic_right
+    priority: 18
+    value: "clamp(5 + 380 * absf(accel_g), 0, 160)"
+
+  # 路肩：音圈给出真正的"碎"感，HID 马达同步给重量
+  - name: coil-kerb-left
+    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    target: haptic_left
+    priority: 30
+    hold: 60ms
+    value: "clamp(140 + 70 * (absf(accel_g) - 0.35), 0, 255)"
+
+  - name: coil-kerb-right
+    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    target: haptic_right
+    priority: 30
+    hold: 60ms
+    value: "clamp(120 + 65 * (absf(accel_g) - 0.35), 0, 245)"
+
+  # 撞击：音圈吃满，给低频"砰"
+  - name: coil-impact
+    when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
+    target: haptic_left
+    priority: 65
+    hold: 140ms
+    value: "clamp(180 + 30 * (absf(accel_g) - 1.5), 0, 255)"
 
   # ---- 灯条：刹车红、油门绿 --------------------------------------------
   - name: lightbar

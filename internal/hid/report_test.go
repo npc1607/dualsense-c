@@ -118,3 +118,35 @@ func TestPlayerLEDControlFlag(t *testing.T) {
 		t.Errorf("player leds = %#x", got)
 	}
 }
+
+// TestVibrationFlagsOnlyWhenRumbling guards the bug that made the voice coils
+// look dead: valid_flag0 is an apply mask, so claiming COMPATIBLE_VIBRATION +
+// HAPTICS_SELECT with zero motors hands the actuators to the HID rumble engine
+// at amplitude 0 and the firmware then ignores the audio-streamed haptics on
+// channels 3/4.
+func TestVibrationFlagsOnlyWhenRumbling(t *testing.T) {
+	idle := BuildUSB(Frame{})
+	if idle[1]&0x03 != 0 {
+		t.Errorf("idle valid_flag0 = %#02x, want vibration bits clear so audio haptics can run", idle[1])
+	}
+	if idle[1]&0x0C != 0x0C {
+		t.Errorf("idle valid_flag0 = %#02x, want trigger bits kept", idle[1])
+	}
+	if idle[1]&0xF0 != 0 {
+		t.Errorf("idle valid_flag0 = %#02x, audio volume bits must stay clear (they mute the DAC)", idle[1])
+	}
+
+	loud := BuildUSB(Frame{RumbleL: 255, RumbleR: 255})
+	if loud[1]&0x03 != 0x03 {
+		t.Errorf("rumbling valid_flag0 = %#02x, want COMPATIBLE_VIBRATION|HAPTICS_SELECT", loud[1])
+	}
+	if loud[1]&0xF0 != 0 {
+		t.Errorf("rumbling valid_flag0 = %#02x, audio volume bits must stay clear", loud[1])
+	}
+
+	// One motor is enough to claim the vibration fields.
+	half := BuildUSB(Frame{RumbleR: 7})
+	if half[1]&0x03 != 0x03 {
+		t.Errorf("single-motor valid_flag0 = %#02x, want vibration bits set", half[1])
+	}
+}

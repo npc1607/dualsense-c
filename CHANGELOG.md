@@ -5,6 +5,23 @@
 
 ## Unreleased
 
+### 修复：音圈（Voice-Coil）终于通了
+- **根因**：`valid_flag0` 是「应用掩码」。ds5d 每 8ms 都写
+  `COMPATIBLE_VIBRATION|HAPTICS_SELECT`（BIT0+BIT1）而 motor 字节为 0，
+  固件因此认为「执行器由 HID 震动引擎驱动，幅度 0」，
+  **USB 音频通道（Ch3/4）的音圈信号被完全忽略**。
+  表现为：往 Ch3/4 灌 40Hz 毫无反应，而喇叭通道正常。
+- **修复**：只有本帧真的有震动时才声明这两个位；空闲时 `valid_flag0` 只保留
+  扳机位（`0x0C`），执行器交还给音频流。`valid_flag2` 的玩家灯位保持原样。
+- 实测（fw 0x0110002a, USB）：修复后播放 50Hz 低频，`bass` 升到 0.47 时
+  **音圈产生真实震动**。
+- 附带确认：`valid_flag0` 的 BIT4-7（音量/audio_control）必须保持清零，
+  否则会把整个 USB 音频 DAC 静音（此前的「完全没声音」就是这个原因）。
+- 新增回归测试 `TestVibrationFlagsOnlyWhenRumbling`：
+  空闲帧不得声明震动位、必须保留扳机位、音量位恒为 0。
+- `assetto-corsa` profile 接入音圈：路肩 / 撞击 / 路面细颗粒同时驱动
+  HID 马达（体感）与音圈（细节）。
+
 ### 新增
 - `source/audio`：抓 PipeWire monitor → 三段带通（`bass` 20-110Hz、`mid` 160-450Hz）
   与全带 `loudness` 的包络信号，attack/release 可配，纯 Go + CLI 子进程
@@ -15,8 +32,18 @@
 - 新增 `audio-haptics` 与 `ffb-recoil` 两个内置 profile
 - `internal/vpad` 平台分层：Linux 用 uinput 实现，Windows 留 ViGEm 接口占位
 - 新增 `udev/71-ds5vpad.rules`
+- 新增 `tools/hidprobe`：逐项对比输出报告的 flag/长度/音量组合，用编号震动做标记
+  （`-no-marker` 可关闭，否则标记震动会掩盖音圈本身的反馈）
 
 ### 修复（均为真机功能测试发现）
+- `hid/report.go`：USB 输出报告的 `valid_flag0` 从 `0xFF` 改为 `0x0F`。
+  `0xFF` 会「启用但并不填充」headphone/speaker/microphone 音量与 audio_control
+  这几个字段，而它们的值恒为 0，等于把控制器 USB 音频 DAC 静音。
+  实测：`0xFF` 下往 Ch1/2 灌 1kHz 完全没有声音；改 `0x0F` 后 1kHz 正常出声。
+  马达与扳机效果不受影响（bit0-3 未变，6Hz 满幅震动实测正常）
+- `sink/haptics`：`pacat` 必须显式指定 `--channel-map=front-left,front-right,
+  rear-left,rear-right`。默认的 4 声道布局是 `front-left,front-center,
+  front-right,rear-center`，会把第 3/4 通道混进耳机通路，音圈收不到任何数据
 - `source/audio`：空闲 sink 会让 `ReadFull` 永久阻塞、源再也不发帧，下游看到过期值；
   改为带读超时，空闲时主动输出衰减帧
 - `source/audio`：包络原本每个音频块只调一次 `step`，而系数是按每采样算的，

@@ -150,8 +150,8 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 | **6 轴运动传感器 (IMU)** | ✅ 100% | 陀螺仪角速度 (`gyro_x/y/z`) + 线性加速度 (`accel_x/y/z`) 归一化 |
 | **触控板坐标 / 电池与充电状态** | ✅ 100% | 1920×1080 触控坐标 (`touch_x/y`)、电量 (`battery`) 与充电标志 (`charging`) |
 | **指示灯全系控制** | ✅ 100% | RGB 状态灯条 (`lightbar`)、静音键指示灯 (`mute_led`)、5 颗玩家指示灯 (`player_leds`) |
-| **高清音圈触感 (Voice-Coil)** | 🚧 规划中 | 占用 USB 声卡第 3、4 声道，48kHz PCM 波形驱动（见规划） |
-| **手柄内置扬声器** | 🚧 规划中 | 占用 USB 声卡第 1、2 声道，PCM 音频输出 |
+| **高清音圈触感 (Voice-Coil)** | ✅ 可用（Linux 实测） | `sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM（`haptic_left/haptic_right`）。**前提**：HID 报告空闲时不得声明 `COMPATIBLE_VIBRATION/HAPTICS_SELECT`，否则执行器被锁在 HID 引擎上、音频流被忽略 |
+| **手柄内置扬声器** | ⚠️ 通路已验证，无专用 sink | Ch1/2 实测可出声；任何能写 PipeWire sink 的工具都能用，本项目未封装 |
 
 > 完整 14 项硬件特性拆解、信号源延迟差距、Astro's Playroom 触感还原度对比及 Linux & Windows 双平台音频触感方案，详见专属技术方案：
 > 👉 **[PS5 DualSense 硬件能力、驱动边界与高清触感技术方案 (docs/hardware-capabilities.md)](docs/hardware-capabilities.md)**
@@ -337,6 +337,14 @@ rules:
 
 ### 音圈触感（`haptics:` 块）
 
+> ✅ **实测状态（Linux, fw 0x0110002a）：可用。**
+> 关键前提：HID 输出报告的 `valid_flag0` 是**应用掩码**。若在 motor 字节为 0 时
+> 仍声明 `COMPATIBLE_VIBRATION|HAPTICS_SELECT`，固件会把执行器锁在 HID 震动
+> 引擎上（幅度 0），**音频通道的音圈信号会被完全忽略**。本项目只在真的有震动
+> 时才声明这两个位，空闲时把执行器交还给音频流。
+> 另外 `valid_flag0` 的 BIT4-7（音量/audio_control）必须保持清零，否则会静音
+> 整个 USB 音频 DAC（表现为连扬声器都没声音）。
+
 DS5 同时是一块 4 声道 48kHz USB 声卡，Ch3/4 直连左右音圈。HID 震动字节只能表达
 「振幅 + 一个调幅频率」，是音圈的低分辨率近似；写 PCM 才能真正还原频谱与瞬态。
 
@@ -350,8 +358,13 @@ haptics:
 
 规则用 `haptic_left` / `haptic_right` 两个 target 驱动它（与 `rumble_*` 同构，支持 `value` + `modulate`）。
 
-> 实测注意事项：`pw-record` / `pw-cat` 的 `--target` 在部分 PipeWire 版本上会被静默忽略，
-> 因此默认使用 PulseAudio 兼容的 `parec` / `pacat`（本项目在 PipeWire 1.x 上实测验证）。
+> 实测注意事项：
+> 1. `pw-record` / `pw-cat` 的 `--target` 在部分 PipeWire 版本上会被静默忽略，
+>    因此默认使用 PulseAudio 兼容的 `parec` / `pacat`。
+> 2. `pacat` 必须带 `--channel-map=front-left,front-right,rear-left,rear-right`，
+>    否则默认的 4 声道布局会把 Ch3/4 混进耳机通路，音圈收不到数据。
+> 3. 输出报告的 `valid_flag0` 必须是 `0x0F`；`0xFF` 会把未填充的音量字段置 0，
+>    从而静音整个 USB 音频 DAC（实测曾导致「完全没声音」）。
 
 ### 表达式语法
 

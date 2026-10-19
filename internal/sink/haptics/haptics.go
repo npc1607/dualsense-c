@@ -44,7 +44,14 @@ type Config struct {
 
 // pacat (PulseAudio compat) honours --device; pw-cat's --target is silently
 // ignored by some PipeWire versions, which would play into the wrong sink.
-const defaultCommand = "pacat --playback --device={target} --rate={rate} --channels={channels} --format=s16le --raw"
+//
+// --channel-map is not optional: without it PipeWire picks a "4 channel"
+// layout such as front-left,front-center,front-right,rear-center and remixes
+// our channels 3/4 into the headphone path, so the voice coils receive
+// nothing. Naming the sink's own layout keeps the 4 channels byte-for-byte
+// aligned with the hardware, which is what puts our samples on the coils.
+const defaultCommand = "pacat --playback --device={target} --rate={rate} --channels={channels} " +
+	"--channel-map=front-left,front-right,rear-left,rear-right --format=s16le --raw"
 
 // Writer mixes a continuous 4-channel stream. Channels 1/2 are kept silent and
 // channels 3/4 carry the haptic waveform.

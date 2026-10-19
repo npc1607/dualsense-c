@@ -326,7 +326,8 @@ rules:
 规则中的 `when` 条件、`params.*` 参数以及 `value` 字段均由 [expr-lang](https://expr-lang.org) 编译为高效字节码执行：
 
 - **变量范围**：所有[标准信号](#标准信号表)（未定义或过期时为 `0`）。
-- **内置数学函数**：`min`, `max`, `abs`, `ceil`, `floor`, `round`, `sqrt`, `pow`。
+- **内置数学函数**：`min`, `max`, `ceil`, `floor`, `round`, `sqrt`, `pow`。
+  ⚠️ 绝对值必须用扩展函数 `absf(x)`：`abs` 是 ABS 介入信号名，信号名会遮蔽同名函数。
 - **扩展工具函数**：
 
 | 函数签名 | 说明 |
@@ -334,6 +335,7 @@ rules:
 | `clamp(x, lo, hi)` | 数值区间夹取 |
 | `lerp(a, b, t)` | 线性插值计算 |
 | `smoothstep(e0, e1, x)` | 埃尔米特插值，提供平滑阶梯过渡 |
+| `absf(x)` | 绝对值（`abs` 被 ABS 信号占用，不能用作函数） |
 | `has("sig")` | 检测目标信号当前是否处于有效刷新周期内（返回 bool） |
 | `pressed("sig")` | 上升沿检测：当前帧从 `< 0.5` 跃迁至 `≥ 0.5`（返回 bool） |
 | `released("sig")` | 下降沿检测：当前帧从 `≥ 0.5` 跌落至 `< 0.5`（返回 bool） |

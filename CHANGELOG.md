@@ -3,6 +3,25 @@
 按 tag 分节。release 流水线会自动抽取对应小节（`## <tag>`）作为发布说明，
 所以**新版本发布前必须在这里加一节**，否则发布正文会退化成一句 compare 链接。
 
+## Unreleased
+
+### 新增
+- AC / ACC / AC Rally 桥接新增底盘与路面信号：`accel_g`（accG[1] 垂直加速度，已归一为 G）、
+  `lat_g`（accG[0]）、`steer`、`surface`（四轮 `tyreDirtyLevel` 最大值）、
+  `custom1`（`carDamage` 最大值）、`custom2`（`suspensionTravel` 最大值）
+- `FieldSpec` 支持 `Scale`（单位换算）与 `Count`（数组取绝对值最大项），
+  `ds5bridge -debug` 同时打印 accelG / latG / steer / surface / damage / susp
+- `assetto-corsa` profile 新增路面细节规则：铺装路面细颗粒、路肩拍频震动、
+  路外草地砂石粗糙感、撞击重锤（左右马达不同频率以形成拍频）
+- 规则引擎新增 `absf(x)` 绝对值函数
+
+### 修复
+- `sink` 增加热插拔恢复：控制器 USB 重枚举后 hidraw 节点会换号（如 hidraw6 → hidraw8），
+  以前写失败只会一直重试旧的 fd、永不重连，表现为「手柄掉线后再也没有输出」；
+  现在写失败会每秒重试一次 `device.Find()` 并重新 attach
+- `abs()` 在任何 profile 中都不可用：`abs` 是 ABS 介入信号名，会遮蔽同名函数；
+  README 中该说明已更正，写绝对值请用 `absf(x)`
+
 ## v0.1.3 - 2026-10-19
 
 ### 新增

@@ -24,6 +24,11 @@ description: |
   刹车 → L2 阻力，油门 → R2 阻力，四轮打滑 → 左马达，
   ABS 介入 → 右马达 14Hz 脉冲，TC 介入 → 右马达持续轻震，
   高转速 → R2 细颗粒感（custom0 为原始转速）。
+  底盘垂直加速度（accel_g = accG[1]）驱动路肩细颗粒振动与撞击重锤，
+  tyreDirtyLevel（surface）驱动路外草地/砂石的粗糙震感。
+
+  细腻度提示：默认 125Hz 输出时，40Hz 以上的调幅已接近上限；
+  想要更细的颗粒感请用 `-rate 250` 启动（DS5 USB 支持 250Hz）。
 
 source:
   type: udp
@@ -57,11 +62,16 @@ rules:
       force: "clamp(8 + 92 * throttle, 0, 255)"
 
   # ---- 车轮打滑 → 左马达 -----------------------------------------------
+  # AC 的 wheelSlip 是原始滑移量（实测 0.02~8.06），不是 0..1。
+  # 直接用 200*slip 会让左马达长期饱和在 255，把路肩纹理全部盖掉，
+  # 所以这里用 smoothstep 把 0.35~2.5 映射成 0~230 的渐变。
+  # 门槛 0.8：实测 p90 就有 0.32，拉力赛常态在滑，门槛太低会让左马达
+  # 长期灌满（这就是"傻震"的主因）。只有真正甩尾才进 0.8 以上。
   - name: slip-rumble
-    when: "slip > 0.08"
+    when: "slip > 0.8"
     target: rumble_left
     priority: 20
-    value: "clamp(200 * slip, 0, 255)"
+    value: "clamp(210 * smoothstep(0.8, 3.0, slip), 0, 210)"
 
   # ---- ABS 介入 → 右马达脉冲 -------------------------------------------
   - name: abs-pulse
@@ -85,6 +95,92 @@ rules:
     priority: 15
     value: "clamp(80 * (custom0 - 5500) / 2500, 0, 255)"
     modulate: { type: sine, hz: 45, depth: 0.5 }
+
+  # ======================================================================
+  # 路面细节：路肩 / 颠簸 / 撞击 / 路外
+  #
+  # 全部来自底盘垂直加速度 accG[1]（accel_g，单位 G）。
+  # 左大马达负责低频“压感”，右小马达负责高频“颗粒感”，两路给不同
+  # 的调幅频率，会形成拍频，听感/手感比单路细腻得多。
+  # absf(...) < 12 是防呆：万一 ACR 的结构偏移变了读到垃圾值，规则自动失效。
+  # ======================================================================
+
+  # ---- 铺装路面细颗粒：速度越快越明显 ---------------------------------
+  # 分工：右马达(小、高频)承担"细颗粒"，一直在但不刺耳；
+  #       左马达(大、低频)只在颠簸明显时加入，负责"重量感"。
+  # 两个马达给不同的调幅频率，会形成拍频，比同频叠加细腻得多。
+  # 实测 ACR 的底盘垂直加速度很小（巡航 p50≈0，p90≈0.04，砂石 0.05~0.2，
+  # 路肩 0.4~1.6，撞击 2~4），所以曲线要有很长的低端行程，不能早早饱和。
+  - name: road-texture-right
+    when: 'has("accel_g") && speed > 5'
+    target: rumble_right
+    priority: 17
+    value: "clamp(5 + 60 * sqrt(max(absf(accel_g), 0.0001)) + 300 * absf(accel_g), 0, 130)"
+    modulate: { type: sine, hz: 53, depth: 0.65 }
+
+  - name: road-texture-left
+    when: 'has("accel_g") && speed > 5 && absf(accel_g) > 0.12'
+    target: rumble_left
+    priority: 17
+    value: "clamp(35 + 300 * (absf(accel_g) - 0.12), 0, 150)"
+    modulate: { type: sine, hz: 38, depth: 0.6 }
+
+  # ---- 路肩 / 颠簸：高频颗粒，左右不同频率形成拍频 ---------------------
+  # 实测路肩尖峰 0.8~1.9，所以门槛从 0.5 降到 0.35（能抓住更轻的路肩），
+  # 基值 130→170、斜率 120→150；并且换成方波调幅：sine+depth0.85 的平均
+  # 幅度只有 57%，方波能让一半时间处于满幅，路肩的"碎震"感明显更硬。
+  # hold 70ms 保证一闪而过的路肩也能被感知（60Hz 数据下一帧只有 16ms）。
+  - name: kerb-left
+    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    target: rumble_left
+    priority: 28
+    hold: 70ms
+    value: "clamp(170 + 150 * (absf(accel_g) - 0.35), 0, 255)"
+    modulate: { type: square, hz: 30, depth: 0.8 }
+
+  - name: kerb-right
+    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    target: rumble_right
+    priority: 28
+    hold: 70ms
+    value: "clamp(155 + 140 * (absf(accel_g) - 0.35), 0, 245)"
+    modulate: { type: square, hz: 44, depth: 0.8 }
+
+  # ---- 路外（草地 / 砂石）：持续粗糙 -----------------------------------
+  # 注意：ACR 实测 tyreDirtyLevel(carDamage 同样) 恒为 0，这两条规则在 ACR
+  # 里不会触发；它们在 AC / ACC 上有效。ACR 的路外颠簸请由上面的 accel_g
+  # 规则承担（草地本身就是连续的 accel_g 抖动）。
+  - name: off-track-left
+    when: 'has("surface") && surface > 0.2 && speed > 8'
+    target: rumble_left
+    priority: 24
+    value: "clamp(60 + 22 * surface, 0, 190)"
+    modulate: { type: sine, hz: 22, depth: 0.7 }
+
+  - name: off-track-right
+    when: 'has("surface") && surface > 0.2 && speed > 8'
+    target: rumble_right
+    priority: 24
+    value: "clamp(50 + 20 * surface, 0, 175)"
+    modulate: { type: sine, hz: 29, depth: 0.7 }
+
+  # ---- 撞击：两路同时重锤，方波让冲击更“实” --------------------------
+  # hold 让单帧尖峰至少保持 120ms，否则 60Hz 数据下一闪而过。
+  - name: impact-left
+    when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
+    target: rumble_left
+    priority: 60
+    hold: 130ms
+    value: "clamp(150 + 38 * (absf(accel_g) - 1.5), 0, 255)"
+    modulate: { type: square, hz: 18, depth: 0.55 }
+
+  - name: impact-right
+    when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
+    target: rumble_right
+    priority: 60
+    hold: 130ms
+    value: "clamp(140 + 35 * (absf(accel_g) - 1.5), 0, 255)"
+    modulate: { type: square, hz: 23, depth: 0.55 }
 
   # ---- 灯条：刹车红、油门绿 --------------------------------------------
   - name: lightbar

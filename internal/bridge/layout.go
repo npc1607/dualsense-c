@@ -17,6 +17,28 @@ type FieldSpec struct {
 	Signal string // standard signal name, e.g. "throttle"
 	Off    int    // byte offset inside the section
 	Kind   Kind
+	// Scale multiplies the raw value before it is sent (0 means 1.0).
+	// Used to normalise units: accG is m/s², a profile expects G.
+	Scale float64
+	// Count > 1 reads Count consecutive values (4-byte stride) and keeps the
+	// one with the largest absolute value, i.e. the worst wheel of an array.
+	Count int
+}
+
+// Factor returns the multiplier to apply to a raw value.
+func (f FieldSpec) Factor() float64 {
+	if f.Scale == 0 {
+		return 1
+	}
+	return f.Scale
+}
+
+// Stride returns how many values to read for this field (at least 1).
+func (f FieldSpec) Stride() int {
+	if f.Count < 1 {
+		return 1
+	}
+	return f.Count
 }
 
 // MaxAbsGroup derives a signal from the maximum absolute value of a set of
@@ -63,6 +85,17 @@ func assettoCorsa() Layout {
 			{Signal: "tc", Off: 204, Kind: KindF32},     // tc
 			{Signal: "abs", Off: 252, Kind: KindF32},    // abs
 			{Signal: "custom0", Off: 20, Kind: KindI32}, // raw engine rpm
+
+			// Chassis / wheel data used for kerb, impact and surface texture.
+			// accG[0..2] at 44/48/52 are m/s²; normalise to G the same way the
+			// forza decoder does. accG[1] is vertical, which is what kerbs and
+			// bumps show up in.
+			{Signal: "steer", Off: 24, Kind: KindF32, Scale: 2},            // steerAngle, ±0.5 rad → ±1
+			{Signal: "lat_g", Off: 44, Kind: KindF32, Scale: 1.0 / 9.81},   // accG[0]
+			{Signal: "accel_g", Off: 48, Kind: KindF32, Scale: 1.0 / 9.81}, // accG[1]
+			{Signal: "surface", Off: 136, Kind: KindF32, Count: 4},         // max tyreDirtyLevel (grass/gravel)
+			{Signal: "custom1", Off: 224, Kind: KindF32, Count: 5},         // max carDamage (impact accumulator)
+			{Signal: "custom2", Off: 184, Kind: KindF32, Count: 4},         // max suspensionTravel
 		},
 		MaxAbs: []MaxAbsGroup{
 			{Target: "slip", Sources: []string{"slip_fl", "slip_fr", "slip_rl", "slip_rr"}},

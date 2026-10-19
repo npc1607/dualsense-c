@@ -286,3 +286,73 @@ func TestSinCosAndChargingBreath(t *testing.T) {
 		t.Errorf("charging breath lightbar expected non-zero green/blue, got %v", f.Lightbar)
 	}
 }
+
+// TestAbsfAvoidsAbsSignalCollision guards the naming trap: "abs" is the
+// ABS-intervention signal, so absolute value must be reached through absf().
+func TestAbsfAvoidsAbsSignalCollision(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "t",
+		Source: profile.Source{Type: "sim"},
+		Rules: []profile.Rule{{
+			Name:   "r",
+			When:   "absf(accel_g) > 0.5",
+			Target: "rumble_left",
+			Value:  "min(absf(accel_g), 255)",
+		}},
+	}
+	set := signal.NewSet(nil)
+	e := mustEngine(t, p, set)
+	base := time.Now()
+	apply(set, base, map[string]float32{"accel_g": -1.5})
+	if f := e.Step(base.Add(time.Millisecond)); f.RumbleL == 0 {
+		t.Errorf("absf(-1.5) should be > 0.5 and drive rumble, got %d", f.RumbleL)
+	}
+}
+
+// TestBuiltinAssettoCorsaRoadFeel checks that the shipped AC/ACC/ACR profile
+// reacts to chassis vertical acceleration: quiet on flat asphalt, buzzing on a
+// kerb, and hammering on an impact.
+func TestBuiltinAssettoCorsaRoadFeel(t *testing.T) {
+	p, err := profile.Resolve("assetto-corsa", "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	set := signal.NewSet(nil)
+	e := mustEngine(t, p, set)
+	base := time.Now()
+
+	// Split of duties: the right (small, high frequency) motor carries the fine
+	// texture, the left (large, low frequency) motor stays silent until
+	// something actually happens.
+	flat := map[string]float32{"speed": 80, "accel_g": 0.01, "throttle": 0.5}
+	apply(set, base, flat)
+	ff := e.Step(base.Add(time.Millisecond))
+	if ff.RumbleR == 0 || ff.RumbleR > 70 {
+		t.Errorf("flat asphalt: right rumble = %d, want a low non-zero texture", ff.RumbleR)
+	}
+	if ff.RumbleL != 0 {
+		t.Errorf("flat asphalt: left rumble = %d, want 0 (left only on events)", ff.RumbleL)
+	}
+
+	kerb := map[string]float32{"speed": 80, "accel_g": 1.4}
+	apply(set, base.Add(20*time.Millisecond), kerb)
+	kf := e.Step(base.Add(21 * time.Millisecond))
+	if kf.RumbleL == 0 || kf.RumbleR == 0 {
+		t.Fatalf("kerb: rumble = %d/%d, want both non-zero", kf.RumbleL, kf.RumbleR)
+	}
+
+	impact := map[string]float32{"speed": 80, "accel_g": 4.0}
+	apply(set, base.Add(40*time.Millisecond), impact)
+	if_ := e.Step(base.Add(41 * time.Millisecond))
+	if if_.RumbleL <= kf.RumbleL || if_.RumbleR <= kf.RumbleR {
+		t.Errorf("impact should hit harder than kerb: kerb %d/%d -> impact %d/%d",
+			kf.RumbleL, kf.RumbleR, if_.RumbleL, if_.RumbleR)
+	}
+
+	// Off-track dirt (tyreDirtyLevel) alone must also produce rumble.
+	off := map[string]float32{"speed": 40, "surface": 1.0}
+	apply(set, base.Add(60*time.Millisecond), off)
+	if f := e.Step(base.Add(61 * time.Millisecond)); f.RumbleL == 0 || f.RumbleR == 0 {
+		t.Errorf("off-track: rumble = %d/%d, want both non-zero", f.RumbleL, f.RumbleR)
+	}
+}

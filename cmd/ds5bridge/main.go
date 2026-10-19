@@ -62,6 +62,7 @@ func main() {
 		port       = flag.Int("port", 9999, "UDP target port on 127.0.0.1")
 		hz         = flag.Int("hz", 60, "send rate in Hz")
 		debug      = flag.Bool("debug", false, "log telemetry values every 2s")
+		events     = flag.Float64("events", 0, "log every frame whose |accel_g| exceeds this (0 = off)")
 		showVer    = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
@@ -109,7 +110,7 @@ func main() {
 			continue
 		}
 		log.Printf("opened %q; streaming", layout.Section)
-		stream(sock, dst, base, layout, ids, *hz, *debug)
+		stream(sock, dst, base, layout, ids, *hz, *debug, *events)
 
 		windows.UnmapViewOfFile(base)
 		windows.CloseHandle(h)
@@ -147,7 +148,7 @@ func tryOpen(section string) (windows.Handle, uintptr, error) {
 	return 0, 0, errors.New(section + " shared memory not found")
 }
 
-func stream(sock windows.Handle, dst windows.SockaddrInet4, base uintptr, layout bridge.Layout, ids map[string]uint8, hz int, debug bool) {
+func stream(sock windows.Handle, dst windows.SockaddrInet4, base uintptr, layout bridge.Layout, ids map[string]uint8, hz int, debug bool, events float64) {
 	interval := time.Second / time.Duration(hz)
 	seen := make(map[string]float32, len(ids))
 	lastDebug := time.Now()
@@ -166,6 +167,9 @@ func stream(sock windows.Handle, dst windows.SockaddrInet4, base uintptr, layout
 			log.Printf("packetId=%d throttle=%.2f brake=%.2f speed=%.1f slip=%.2f abs=%.2f tc=%.2f",
 				packetID, seen["throttle"], seen["brake"], seen["speed"],
 				seen["slip"], seen["abs"], seen["tc"])
+			log.Printf("accelG=%.2f latG=%.2f steer=%.2f surface=%.2f damage=%.3f susp=%.3f",
+				seen["accel_g"], seen["lat_g"], seen["steer"],
+				seen["surface"], seen["custom1"], seen["custom2"])
 			lastDebug = time.Now()
 		}
 
@@ -179,6 +183,14 @@ func stream(sock windows.Handle, dst windows.SockaddrInet4, base uintptr, layout
 			continue
 		}
 		badFrames = 0
+
+		// -events logs only the interesting frames (kerb hits, impacts) at full
+		// 60 Hz resolution, which -debug's 2 s sampling would miss entirely.
+		if events > 0 && float64(absf(seen["accel_g"])) >= events {
+			log.Printf("EVENT accelG=%.2f latG=%.2f speed=%.1f thr=%.2f brk=%.2f surface=%.2f damage=%.4f susp=%.3f",
+				seen["accel_g"], seen["lat_g"], seen["speed"], seen["throttle"],
+				seen["brake"], seen["surface"], seen["custom1"], seen["custom2"])
+		}
 
 		// A live game keeps bumping packetId; if it stops for two seconds the
 		// session ended (or restarted) and the mapping must be re-opened.
@@ -213,10 +225,26 @@ func stream(sock windows.Handle, dst windows.SockaddrInet4, base uintptr, layout
 }
 
 func readValue(base uintptr, f bridge.FieldSpec) float32 {
-	if f.Kind == bridge.KindI32 {
-		return float32(readI32(base, f.Off))
+	var best float32
+	for i := 0; i < f.Stride(); i++ {
+		var v float32
+		if f.Kind == bridge.KindI32 {
+			v = float32(readI32(base, f.Off+i*4))
+		} else {
+			v = readF32(base, f.Off+i*4)
+		}
+		if i == 0 || absf(v) > absf(best) {
+			best = v
+		}
 	}
-	return readF32(base, f.Off)
+	return best * float32(f.Factor())
+}
+
+func absf(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func readF32(base uintptr, off int) float32 {

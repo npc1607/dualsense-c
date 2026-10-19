@@ -43,6 +43,10 @@ func main() {
 		{"abs", mustID("abs")},
 		{"tc", mustID("tc")},
 		{"custom0", mustID("custom0")},
+		{"accel_g", mustID("accel_g")},
+		{"lat_g", mustID("lat_g")},
+		{"surface", mustID("surface")},
+		{"custom1", mustID("custom1")},
 	}
 
 	log.Printf("sending simulated bridge packets to %s at %d Hz", addr, *hz)
@@ -68,8 +72,9 @@ func main() {
 	}
 }
 
-// script repeats an 8 second throttle/brake cycle with a slip spike and an ABS
-// and TC window, so every rule in the profile gets exercised.
+// script repeats an 8 second throttle/brake cycle with a slip spike, an ABS
+// and TC window, a kerb section and one hard impact, so every rule in the
+// profile gets exercised.
 func script(t float64) map[string]float64 {
 	const cycle = 8.0
 	phase := math.Mod(t, cycle)
@@ -96,6 +101,21 @@ func script(t float64) map[string]float64 {
 	case phase < 7:
 		v["brake"] = 1 - (phase-6)/1
 		v["speed"] = 40
+	}
+
+	// Kerb section: a 1.2 s burst of 12 Hz vertical oscillation.
+	if phase > 6.2 && phase < 7.4 {
+		v["accel_g"] = 1.3 + 0.9*math.Sin(2*math.Pi*12*phase)
+		v["surface"] = 0.25
+	}
+	// One hard impact: 3.5 G spike with a short decay.
+	if phase > 7.6 && phase < 7.9 {
+		v["accel_g"] = 4.2 * (1 - (phase-7.6)/0.3)
+		v["custom1"] = 0.01 * (phase - 7.6)
+	}
+	// Light road texture everywhere else.
+	if v["accel_g"] == 0 {
+		v["accel_g"] = 0.05 * math.Sin(2*math.Pi*7*phase)
 	}
 	return v
 }

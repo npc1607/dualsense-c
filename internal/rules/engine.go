@@ -138,6 +138,21 @@ func (e *Engine) installHelpers() {
 		return t * t * (3 - 2*t)
 	}
 	e.env["sec"] = func() float64 { return e.now.Sub(e.start).Seconds() }
+	// absf is absolute value. It cannot be called "abs": that name is already
+	// taken by the ABS-intervention signal, and signal names win because they
+	// are bound into the same environment.
+	e.env["absf"] = math.Abs
+	// The README advertises these as builtins, but expr-lang only ships
+	// min/max/round; the rest have to be bound here.
+	e.env["sqrt"] = func(v float64) float64 {
+		if v < 0 {
+			return 0
+		}
+		return math.Sqrt(v)
+	}
+	e.env["pow"] = math.Pow
+	e.env["ceil"] = math.Ceil
+	e.env["floor"] = math.Floor
 	e.env["sin"] = math.Sin
 	e.env["cos"] = math.Cos
 }

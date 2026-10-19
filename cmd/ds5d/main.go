@@ -147,7 +147,24 @@ func run() error {
 	}
 
 	logger.Printf("driving %s at %d Hz", dev.Info().Path, *rate)
-	return sink.New(dev, *rate, logger).Run(ctx, produce)
+	s := sink.New(dev, *rate, logger)
+	// Survive a USB re-enumeration: the hidraw node changes number when the
+	// controller is unplugged or the link resets, so re-find it instead of
+	// writing into a dead fd.
+	s.SetReopen(func(old device.Device) (device.Device, error) {
+		_ = old.Close()
+		if *hidrawPath != "" {
+			if d, err := device.OpenPath(*hidrawPath); err == nil {
+				return d, nil
+			}
+		}
+		info, err := device.Find()
+		if err != nil {
+			return nil, err
+		}
+		return device.Open(info)
+	})
+	return s.Run(ctx, produce)
 }
 
 func openDevice(ctx context.Context, path string, logger *log.Logger) (device.Device, error) {

@@ -9,6 +9,8 @@
 - 输入解析补齐手柄传感器：陀螺仪 `gyro_x/y/z`、加速度 `accel_x/y/z`、触控板坐标
   `touch_x/touch_y/touch_active`、电量 `battery/charging`（`ds5ctl watch` 同时打印原始字节便于校准）
 - 规则新增 `mute_led` target（静音键指示灯）
+- 规则引擎内置三角函数 `sin` / `cos` 支持，`generic` profile 新增充电淡蓝呼吸灯与满电指示规则
+- 新增 `docs/hardware-capabilities.md`：系统分析 DS5 硬件能力、信号源限制与 Voice-Coil 高清音频触感方案
 
 ### 修复
 - `player_leds` 之前可能不生效：`valid_flag2` 现在只在值非 0 时打开 player-LED 控制位

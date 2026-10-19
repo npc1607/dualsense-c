@@ -261,3 +261,28 @@ func TestSensorSignalsReachRules(t *testing.T) {
 		t.Errorf("battery fine: lightbar = %v, want untouched", f.Lightbar)
 	}
 }
+
+func TestSinCosAndChargingBreath(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "charging-test",
+		Source: profile.Source{Type: "sim"},
+		Rules: []profile.Rule{{
+			When:   "charging == 1",
+			Target: "lightbar",
+			Params: map[string]string{
+				"r": "0",
+				"g": "round(lerp(20, 100, (sin(sec()) + 1) / 2))",
+				"b": "round(lerp(50, 200, (cos(sec()) + 1) / 2))",
+			},
+		}},
+	}
+	set := signal.NewSet(nil)
+	e := mustEngine(t, p, set)
+	base := time.Now()
+
+	apply(set, base, map[string]float32{"charging": 1})
+	f := e.Step(base.Add(time.Millisecond))
+	if f.Lightbar[1] == 0 || f.Lightbar[2] == 0 {
+		t.Errorf("charging breath lightbar expected non-zero green/blue, got %v", f.Lightbar)
+	}
+}

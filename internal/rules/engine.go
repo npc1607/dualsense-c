@@ -138,6 +138,8 @@ func (e *Engine) installHelpers() {
 		return t * t * (3 - 2*t)
 	}
 	e.env["sec"] = func() float64 { return e.now.Sub(e.start).Seconds() }
+	e.env["sin"] = math.Sin
+	e.env["cos"] = math.Cos
 }
 
 func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {

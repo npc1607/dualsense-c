@@ -34,6 +34,11 @@ const (
 type Frame struct {
 	L2, R2           Trigger
 	RumbleL, RumbleR uint8
+	// HapticL/HapticR are amplitudes for the voice-coil actuators, driven over
+	// the controller's USB audio channels 3/4 instead of the HID rumble bytes.
+	// The HID path only has "amplitude + one modulation frequency"; audio gives
+	// the coils a real waveform, which is where fine texture comes from.
+	HapticL, HapticR uint8
 	Lightbar         [3]uint8 // RGB
 	PlayerLEDs       uint8    // 0 = off, 0x04 = player 1
 	MuteLED          bool

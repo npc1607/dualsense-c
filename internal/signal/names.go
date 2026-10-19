@@ -31,6 +31,9 @@ var Standard = []string{
 	"accel_x", "accel_y", "accel_z",
 	"touch_x", "touch_y", "touch_active", // touchpad contact, 0..1
 	"battery", "charging", // battery 0..1 (10% steps)
+
+	// Audio envelope (source/audio): 0..1, already smoothed and normalised.
+	"bass", "mid", "loudness",
 }
 
 var standard = func() map[string]struct{} {

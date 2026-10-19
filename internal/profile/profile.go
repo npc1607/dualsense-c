@@ -56,6 +56,32 @@ type Profile struct {
 	Safety      Safety   `yaml:"safety"`
 	Extra       []string `yaml:"signals"` // extra signal names this profile may use
 	Rules       []Rule   `yaml:"rules"`
+	Haptics     *Haptics `yaml:"haptics"` // optional voice-coil output
+}
+
+// Haptics configures the optional voice-coil (audio) output.
+//
+// The HID rumble bytes can only express an amplitude plus one modulation
+// frequency, which is why fine texture feels coarse on them. The controller is
+// also a 4-channel USB sound card whose channels 3/4 drive the same coils, so
+// streaming PCM there gives real waveforms. Rules write that output through the
+// `haptic_left` / `haptic_right` targets.
+type Haptics struct {
+	// Enabled defaults to true when the block is present.
+	Enabled *bool `yaml:"enabled"`
+	// Target is a PipeWire sink name, or "auto" to detect the DualSense.
+	Target string `yaml:"target"`
+	// CarrierHz is the fundamental of the synthesised waveform (default 55).
+	CarrierHz float64 `yaml:"carrier_hz"`
+	// Gain scales the 0..255 rule output into PCM amplitude (default 0.55).
+	Gain float64 `yaml:"gain"`
+	// Command overrides the playback command template.
+	Command string `yaml:"command"`
+}
+
+// IsEnabled reports whether haptic output should be opened.
+func (h *Haptics) IsEnabled() bool {
+	return h != nil && (h.Enabled == nil || *h.Enabled)
 }
 
 // Shapers maps a signal name to its shaping parameters.
@@ -93,7 +119,8 @@ type Safety struct {
 
 // Rule is one declarative mapping from signals to an effect.
 //
-//	target: l2 | r2 | rumble_left | rumble_right | lightbar | player_leds | mute_led
+//	target: l2 | r2 | rumble_left | rumble_right | haptic_left | haptic_right |
+//	        lightbar | player_leds | mute_led
 //	effect: off | rigid | section | feedback | weapon | vibration |
 //	        slope_feedback | slope_weapon | machine      (triggers only)
 //	when:   optional expression, the rule only applies while it is true
@@ -189,7 +216,8 @@ func (p *Profile) Validate() error {
 			if r.Effect == "" {
 				return fmt.Errorf("profile %s: %s: effect is required for target %s", p.Name, label, r.Target)
 			}
-		case "rumble_left", "rumble_right", "player_leds", "mute_led":
+		case "rumble_left", "rumble_right", "haptic_left", "haptic_right",
+			"player_leds", "mute_led":
 			if r.Value == "" {
 				return fmt.Errorf("profile %s: %s: value is required for target %s", p.Name, label, r.Target)
 			}

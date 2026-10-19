@@ -9,4 +9,7 @@ import (
 
 	// native game telemetry over UDP (Forza, BeamNG, DiRT family, ...)
 	_ "github.com/npc1607/dualsense-c/internal/source/udp"
+
+	// audio envelope (bass/mid/loudness) from a PipeWire monitor
+	_ "github.com/npc1607/dualsense-c/internal/source/audio"
 )

@@ -20,6 +20,7 @@ import (
 	"github.com/npc1607/dualsense-c/internal/rules"
 	sig "github.com/npc1607/dualsense-c/internal/signal"
 	"github.com/npc1607/dualsense-c/internal/sink"
+	"github.com/npc1607/dualsense-c/internal/sink/haptics"
 	"github.com/npc1607/dualsense-c/internal/source"
 
 	// register built-in sources
@@ -144,6 +145,33 @@ func run() error {
 	if *dryRun {
 		logger.Printf("dry run: printing frames at 10 Hz (ctrl-c to stop)")
 		return runDry(ctx, produce, logger)
+	}
+
+	// Optional voice-coil output over the controller's USB audio interface.
+	if p.Haptics.IsEnabled() {
+		hw, err := haptics.Open(haptics.Config{
+			Target:    p.Haptics.Target,
+			CarrierHz: p.Haptics.CarrierHz,
+			Gain:      p.Haptics.Gain,
+			Command:   p.Haptics.Command,
+		}, logger)
+		if err != nil {
+			logger.Printf("haptics disabled: %v", err)
+		} else {
+			defer hw.Close()
+			go func() {
+				if err := hw.Run(ctx); err != nil && ctx.Err() == nil {
+					logger.Printf("haptics stopped: %v", err)
+				}
+			}()
+			inner := produce
+			produce = func(now time.Time) hid.Frame {
+				f := inner(now)
+				hw.Set(f.HapticL, f.HapticR)
+				return f
+			}
+			logger.Printf("haptics: voice-coil output enabled")
+		}
 	}
 
 	logger.Printf("driving %s at %d Hz", dev.Info().Path, *rate)

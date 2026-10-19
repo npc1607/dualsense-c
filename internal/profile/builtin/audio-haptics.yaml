@@ -1,0 +1,91 @@
+# 音频触感（任意游戏通用，走 DS5 的 USB 音频音圈通道）
+#
+# 链路：
+#   PipeWire 默认输出 → pw-record 抓 monitor → 三段包络（bass/mid/loudness）
+#     → 规则引擎 → haptic_left / haptic_right
+#     → pw-cat 往 DS5 声卡 Ch3/4 写 48kHz PCM → 左右音圈
+#
+# 为什么值得用音频而不是 HID 震动字节：
+#   HID 只能表达「振幅 + 一个调幅频率」，是音圈的低分辨率近似；
+#   往 Ch3/4 写 PCM 等于把音圈当扬声器驱动，频谱与瞬态都能保留，
+#   细腻度是 HID 通道物理上做不到的。
+#
+# 用法：
+#   ./bin/ds5d -profile audio-haptics
+#
+# 注意：
+#   1) 需要 pw-record / pw-cat / pactl（PipeWire 工具链）
+#   2) `target: auto` 会抓默认输出的 monitor —— 想只抓游戏，把 target
+#      改成一个具体的 sink/monitor 名字（pactl list short sinks 查看）
+#   3) 音乐和语音也会进 bass 通道，所以 gain 不要给太高
+name: audio-haptics
+title: 音频触感（任意游戏，音圈 PCM）
+description: |
+  不依赖任何游戏遥测：抓系统低频音频生成音圈触感。
+  引擎低频 → 持续颗粒，撞击爆炸 → 瞬态重击；同时用 HID 马达做低频补强。
+
+source:
+  type: audio
+  target: auto
+  rate_hz: 60
+  gain: 3.0
+  attack_ms: 4
+  release_ms: 90
+  bass_hz: "20,110"
+  mid_hz: "160,450"
+
+haptics:
+  target: auto
+  carrier_hz: 55
+  gain: 0.5
+
+safety:
+  signal_ttl: 400ms
+  release: 200ms
+  status_lightbar: false
+
+rules:
+  # ---- 低频 → 音圈（细腻纹理走音频，这是主输出） ----------------------
+  - name: coil-bass
+    when: 'has("bass")'
+    target: haptic_left
+    priority: 10
+    value: "clamp(255 * bass, 0, 255)"
+
+  - name: coil-bass-right
+    when: 'has("bass")'
+    target: haptic_right
+    priority: 10
+    value: "clamp(235 * bass, 0, 235)"
+
+  # ---- 中频瞬态 → 音圈（枪声、碎石、金属撞击的"脆"） ------------------
+  - name: coil-mid
+    when: 'has("mid") && mid > 0.12'
+    target: haptic_right
+    priority: 20
+    value: "clamp(200 * mid, 0, 200)"
+
+  # ---- HID 马达补强低频（音圈负责细节，马达负责体感） ------------------
+  - name: motor-bass
+    when: 'has("bass") && bass > 0.35'
+    target: rumble_left
+    priority: 5
+    value: "clamp(190 * (bass - 0.35), 0, 190)"
+    modulate: { type: sine, hz: 34, depth: 0.55 }
+
+  - name: motor-impact
+    when: 'has("loudness") && loudness > 0.75'
+    target: rumble_right
+    priority: 30
+    hold: 90ms
+    value: "clamp(215 * (loudness - 0.75) + 110, 0, 255)"
+    modulate: { type: square, hz: 26, depth: 0.6 }
+
+  # ---- 灯条随低频亮度变化（可视化，便于调试） --------------------------
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(120 * bass, 0, 120)"
+      g: "clamp(40 + 160 * mid, 0, 200)"
+      b: "clamp(200 * (1 - bass), 0, 200)"

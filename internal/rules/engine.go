@@ -24,6 +24,8 @@ const (
 	targetR2          target = "r2"
 	targetRumbleLeft  target = "rumble_left"
 	targetRumbleRight target = "rumble_right"
+	targetHapticLeft  target = "haptic_left"
+	targetHapticRight target = "haptic_right"
 	targetLightbar    target = "lightbar"
 	targetPlayerLEDs  target = "player_leds"
 	targetMuteLED     target = "mute_led"
@@ -203,7 +205,8 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 			}
 			r.params[idx] = prog
 		}
-	case targetRumbleLeft, targetRumbleRight, targetPlayerLEDs, targetMuteLED:
+	case targetRumbleLeft, targetRumbleRight, targetHapticLeft, targetHapticRight,
+		targetPlayerLEDs, targetMuteLED:
 		prog, err := e.compile(pr.Value)
 		if err != nil {
 			return fail(fmt.Errorf("value: %w", err))
@@ -306,17 +309,22 @@ func (e *Engine) apply(r *rule, f *hid.Frame, written map[target]bool) {
 			f.R2 = t
 		}
 		e.lastTrigger[r.target] = t
-	case targetRumbleLeft, targetRumbleRight:
+	case targetRumbleLeft, targetRumbleRight, targetHapticLeft, targetHapticRight:
 		v, err := e.eval(r.value)
 		if err != nil {
 			e.reportErr(r, err)
 			return
 		}
 		n := e.modulateVal(r, v)
-		if r.target == targetRumbleLeft {
+		switch r.target {
+		case targetRumbleLeft:
 			f.RumbleL = n
-		} else {
+		case targetRumbleRight:
 			f.RumbleR = n
+		case targetHapticLeft:
+			f.HapticL = n
+		case targetHapticRight:
+			f.HapticR = n
 		}
 		e.lastRumble[r.target] = n
 	case targetLightbar:
@@ -399,7 +407,9 @@ func (e *Engine) decay(f *hid.Frame, written map[target]bool, now time.Time) {
 		}
 	}
 
-	for _, tg := range []target{targetRumbleLeft, targetRumbleRight} {
+	for _, tg := range []target{
+		targetRumbleLeft, targetRumbleRight, targetHapticLeft, targetHapticRight,
+	} {
 		if written[tg] {
 			continue
 		}
@@ -423,10 +433,15 @@ func (e *Engine) decay(f *hid.Frame, written map[target]bool, now time.Time) {
 			continue
 		}
 		v := uint8(math.Round(float64(from) * frac))
-		if tg == targetRumbleLeft {
+		switch tg {
+		case targetRumbleLeft:
 			f.RumbleL = v
-		} else {
+		case targetRumbleRight:
 			f.RumbleR = v
+		case targetHapticLeft:
+			f.HapticL = v
+		case targetHapticRight:
+			f.HapticR = v
 		}
 	}
 }

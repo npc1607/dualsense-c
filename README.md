@@ -49,7 +49,7 @@
 
 | 分层 | 职责定义 | 适配新游戏时的变动 |
 |---|---|---|
-| **Source** | 接入游戏状态并转为标准化信号（`trigger` 输入驱动 / `udp` 遥测 / `sim` 虚拟模拟） | 原生 UDP 遥测调整 YAML；无新协议无需修改代码 |
+| **Source** | 接入游戏状态并转为标准化信号（`trigger` 输入驱动 / `udp` 遥测 / `audio_ai` 音频 AI 事件探测 / `sim` 虚拟模拟） | 原生遥测与 AI 探测调整 YAML；无新协议无需修改代码 |
 | **signal.Set** | 信号归一化、时间戳追踪、过期判定，以及死区（deadzone）与变化率限制（slew rate）处理 | 框架底层维护，无需修改 |
 | **rules** | 声明式规则引擎，通过表达式将信号映射为扳机、马达及灯条动作，支持优先级、锁存与衰减 | 仅编写/修改 Profile YAML |
 | **sink** | 固定时钟周期（125~250 Hz）组装并写入 HID 输出报告，负责设备热插拔与退出重置 | 框架底层维护，无需修改 |
@@ -274,7 +274,7 @@ go run ./tools/bridgesim -port 9999
 |---|---|---|
 | `-profile` | `fps` | 指定加载的 Profile 名称（内置）或自定义 `.yaml` 绝对/相对路径 |
 | `-profiles` | 空 | 指定自定义 Profile 的扫描目录 |
-| `-source` | 空 | 覆盖 Profile 中声明的 Source 类型（如 `sim`、`trigger`、`udp`） |
+| `-source` | 空 | 覆盖 Profile 中声明的 Source 类型（如 `sim`、`trigger`、`udp`、`audio_ai`） |
 | `-hidraw` | 自动识别 | 显式指定控制器设备节点路径（如 `/dev/hidraw3`） |
 | `-rate` | `125` | HID 报告发送频率（Hz），DualSense USB 最高支持 250 Hz |
 | `-dry-run` | 禁用 | 纯逻辑仿真模式，不打开物理控制器，控制台打印输出帧 |
@@ -320,7 +320,7 @@ description: |               # 详细描述信息
   配置说明与适配版本记录
 
 source:
-  type: udp                  # 数据源类型：trigger | udp | sim
+  type: udp                  # 数据源类型：trigger | udp | audio_ai | sim
   listen: "0.0.0.0:5300"     # 监听地址与端口
   decoder: forza             # 数据解码器：forza | outgauge | dirt | fields | auto
   rate_hz: 60                # 数据采样频率上限
@@ -561,12 +561,15 @@ internal/
     trigger/              手柄按键与扳机行程驱动源
     udp/                  UDP 遥测驱动（Forza / OutGauge / DiRT / ACSHM / Fields）
     audio/                音频包络源（PipeWire monitor → bass/mid/loudness）
+    audioai/              音频 AI 事件与材质探测驱动源（YAMNet/ONNX）
     ffb/                  力反馈源（虚拟手柄捕获的 rumble → ffb_left/right）
     sim/                  离线仿真数据源
 udev/70-dualsense.rules   Linux 非 root 读写权限规则
 scripts/launch-bridge.sh  Proton 前缀桥接启动脚本
 scripts/ds5-acr.sh        ACR/AC/ACC 一键启停（start/stop/status/logs）
-tools/bridgesim/          共享内存桥接数据流本地仿真器
+tools/
+  bridgesim/              共享内存桥接数据流本地仿真器
+  yamnet_bridge/          Audio AI 伴生探测器（YAMNet ONNX 实时/模拟推理）
 profiles/                 用户自定义 Profile 目录
 ```
 

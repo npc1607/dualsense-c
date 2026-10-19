@@ -130,7 +130,7 @@ function buildExcalidrawJSON() {
   addRect({ x: 430, y: 140, width: 320, height: 220, backgroundColor: "#ebfbee", strokeColor: "#0ca678", strokeWidth: 2 });
   addText({ x: 440, y: 155, width: 300, height: 28, text: "① Source 适配器", fontSize: 20, strokeColor: "#0ca678" });
   addText({ x: 440, y: 183, width: 300, height: 20, text: "internal/source", fontSize: 13, strokeColor: "#868e96" });
-  addText({ x: 455, y: 210, width: 280, height: 24, text: "• 支持模式: trigger / udp / sim", fontSize: 15, strokeColor: "#2b2b2b", textAlign: "left" });
+  addText({ x: 455, y: 210, width: 280, height: 24, text: "• 支持模式: trigger / udp / audio_ai / sim", fontSize: 14.5, strokeColor: "#2b2b2b", textAlign: "left" });
   addText({ x: 455, y: 240, width: 280, height: 24, text: "• 协议包解析与动态字段映射", fontSize: 15, strokeColor: "#2b2b2b", textAlign: "left" });
   addText({ x: 455, y: 270, width: 280, height: 24, text: "• 扳机行程按键采样与打时间戳", fontSize: 15, strokeColor: "#2b2b2b", textAlign: "left" });
   addText({ x: 455, y: 300, width: 280, height: 24, text: "• 采样率控制与异步通道分发", fontSize: 15, strokeColor: "#2b2b2b", textAlign: "left" });
@@ -197,7 +197,7 @@ function buildExcalidrawJSON() {
   addText({ x: 100, y: 688, width: 980, height: 30, text: "⚙️ profiles/*.yaml 声明式游戏配置中心", fontSize: 22, strokeColor: "#c92a2a" });
   addText({ x: 100, y: 720, width: 980, height: 22, text: "游戏差异完全由 YAML 定义，无需修改或重新编译程序；支持离线静态编译校验与启动热加载", fontSize: 15, strokeColor: "#495057" });
 
-  addText({ x: 80, y: 755, width: 1000, height: 24, text: "• source 块：声明输入源类型 (trigger / udp / sim)、监听端口、内置解码器 (forza/outgauge/dirt) 与动态字段偏移", fontSize: 14.5, strokeColor: "#2b2b2b", textAlign: "left" });
+  addText({ x: 80, y: 755, width: 1000, height: 24, text: "• source 块：声明输入源类型 (trigger / udp / audio_ai / sim)、监听端口、内置解码器与动态字段偏移", fontSize: 14.5, strokeColor: "#2b2b2b", textAlign: "left" });
   addText({ x: 80, y: 785, width: 1000, height: 24, text: "• shape 块：配置各信号的物理死区 (deadzone)、非线性响应曲线 (gamma) 以及上升/下降平滑速率 (slew rate)", fontSize: 14.5, strokeColor: "#2b2b2b", textAlign: "left" });
   addText({ x: 80, y: 815, width: 1000, height: 24, text: "• rules 块：声明激活条件 when (Expr 表达式)、目标部件、扳机模式 (rigid/feedback/weapon) 与优先级 priority", fontSize: 14.5, strokeColor: "#2b2b2b", textAlign: "left" });
 
@@ -293,7 +293,7 @@ function buildSVG() {
     <text class="card-sub" x="160" y="56" text-anchor="middle">internal/source</text>
     <line x1="25" y1="72" x2="295" y2="72" stroke="#b2f2bb" stroke-width="1.5" stroke-dasharray="4,4"/>
     <g class="card-item" transform="translate(24, 102)">
-      <text y="0">• 支持类型: trigger / udp / sim</text>
+      <text y="0">• 支持类型: trigger / udp / audio_ai / sim</text>
       <text y="28">• 原始遥测协议解码与动态字段解析</text>
       <text y="56">• 扳机按键行程采样与时间戳记录</text>
       <text y="84">• 数据刷新率控制与异常容错保护</text>
@@ -387,7 +387,7 @@ function buildSVG() {
     <line x1="30" y1="74" x2="1050" y2="74" stroke="#ffc9c9" stroke-width="1.5" stroke-dasharray="4,4"/>
     
     <g class="card-item" transform="translate(35, 104)" font-size="15">
-      <text y="0">• <tspan font-weight="700">source 块</tspan>：声明输入源类型 (trigger / udp / sim)、监听端口、内置解码器 (forza / outgauge / dirt) 与动态字段偏移</text>
+      <text y="0">• <tspan font-weight="700">source 块</tspan>：声明输入源类型 (trigger / udp / audio_ai / sim)、监听端口、内置解码器与动态字段偏移</text>
       <text y="28">• <tspan font-weight="700">shape 块</tspan>：配置各物理信号的死区 (deadzone)、非线性响应曲线 (gamma) 以及上升/下降平滑速率 (slew rate)</text>
       <text y="56">• <tspan font-weight="700">rules 块</tspan>：声明触发条件 when (Expr 表达式)、目标部件、扳机模式 (rigid / feedback / weapon) 与优先级 priority</text>
     </g>

@@ -144,17 +144,17 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 
 | 硬件能力分类 | 支持度 | 驱动通道与技术实现 |
 |---|---|---|
-| **自适应阻力扳机 (L2/R2)** | ✅ 100% | HID 报告（11 字节协议），语义封装 8 种模式 + 裸参数 `p0..p9` |
-| **传统马达震动 (L/R)** | ✅ 100% | HID 报告（0~255 幅度），支持正弦波与方波动态调幅 |
-| **全部按键 / 摇杆 / 扳机行程** | ✅ 100% | HID 输入报告解析，支持高敏度连续量与边沿检测 |
-| **6 轴运动传感器 (IMU)** | ✅ 100% | 陀螺仪角速度 (`gyro_x/y/z`) + 线性加速度 (`accel_x/y/z`) 归一化 |
-| **触控板坐标 / 电池与充电状态** | ✅ 100% | 1920×1080 触控坐标 (`touch_x/y`)、电量 (`battery`) 与充电标志 (`charging`) |
-| **指示灯全系控制** | ✅ 100% | RGB 状态灯条 (`lightbar`)、静音键指示灯 (`mute_led`)、5 颗玩家指示灯 (`player_leds`) |
-| **高清音圈触感 (Voice-Coil)** | 🚧 规划中 | 占用 USB 声卡第 3、4 声道，48kHz PCM 波形驱动（见规划） |
-| **手柄内置扬声器** | 🚧 规划中 | 占用 USB 声卡第 1、2 声道，PCM 音频输出 |
+| **自适应阻力扳机 (L2/R2)** | [支持] 100% | HID 报告（11 字节协议），语义封装 8 种模式 + 裸参数 `p0..p9` |
+| **传统马达震动 (L/R)** | [支持] 100% | HID 报告（0~255 幅度），支持正弦波与方波动态调幅 |
+| **全部按键 / 摇杆 / 扳机行程** | [支持] 100% | HID 输入报告解析，支持高敏度连续量与边沿检测 |
+| **6 轴运动传感器 (IMU)** | [支持] 100% | 陀螺仪角速度 (`gyro_x/y/z`) + 线性加速度 (`accel_x/y/z`) 归一化 |
+| **触控板坐标 / 电池与充电状态** | [支持] 100% | 1920×1080 触控坐标 (`touch_x/y`)、电量 (`battery`) 与充电标志 (`charging`) |
+| **指示灯全系控制** | [支持] 100% | RGB 状态灯条 (`lightbar`)、静音键指示灯 (`mute_led`)、5 颗玩家指示灯 (`player_leds`) |
+| **高清音圈触感 (Voice-Coil)** | [规划中] | 占用 USB 声卡第 3、4 声道，48kHz PCM 波形驱动（见规划） |
+| **手柄内置扬声器** | [规划中] | 占用 USB 声卡第 1、2 声道，PCM 音频输出 |
 
 > 完整 14 项硬件特性拆解、信号源延迟差距、Astro's Playroom 触感还原度对比及 Linux & Windows 双平台音频触感方案，详见专属技术方案：
-> 👉 **[PS5 DualSense 硬件能力、驱动边界与高清触感技术方案 (docs/hardware-capabilities.md)](docs/hardware-capabilities.md)**
+> 详细参见 **[PS5 DualSense 硬件能力、驱动边界与高清触感技术方案 (docs/hardware-capabilities.md)](docs/hardware-capabilities.md)**
 
 ---
 
@@ -164,7 +164,8 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 
 | 数据源类型 | 工作机制 | 支持状态 |
 |---|---|---|
-| `trigger` 源 | 解析控制器自身的输入报告（L2/R2 行程、按键状态、摇杆偏移），通过规则引擎生成阻力、挡墙与震动反馈 | ✅ 生产可用 |
+| `trigger` 源 | 解析控制器自身的输入报告（L2/R2 行程、按键状态、摇杆偏移），通过规则引擎生成阻力、挡墙与震动反馈 | [可用] 生产就绪 |
+| `audio_ai` 源 | 监听本地伴生探测器（YAMNet ONNX 实时分析系统声卡混音），输出水洼/铁板/枪声等事件信号 | [实验] 可用（详见 [方案文档](docs/audio-ai-event-detection.md)） |
 
 适用于 FPS、TPS 及各类动作游戏。不受游戏本身是否支持 DualSense 限制（需注意避免与 Steam Input 的震动控制产生抢占冲突）。
 
@@ -172,14 +173,14 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 
 | 游戏名称 | 默认端口与格式 | 解码器 | 支持状态 |
 |---|---|---|---|
-| Forza Horizon 4 / 5、Forza Motorsport 7 / 2023 | UDP **5300**（Data Out 模式，数据格式需设置为 **Dash**） | `forza` | ✅ 内置支持 |
-| BeamNG.drive | UDP **4444**（选项 → 其他 → 启用 OutGauge） | `outgauge` | ✅ 内置支持 |
-| Live for Speed | UDP **4444**（选项 → 外设 → OutGauge） | `outgauge` | ✅ 内置支持 |
-| DiRT Rally 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（配置 → 启用 UDP 遥测） | `dirt` + `fields` | ⚠️ 提供模板（各版本结构差异较大，需使用 `sniff` 校准） |
-| F1 22 / 23 / 24 | UDP **20777** | `fields` | ⚠️ 提供模板（按年份版本校准字段偏移） |
-| Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | ✅ 内置支持（采用实测偏移定义） |
-| rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | 🚧 规划中 |
-| iRacing | 内存映射 SDK | — | 🚧 规划中 |
+| Forza Horizon 4 / 5、Forza Motorsport 7 / 2023 | UDP **5300**（Data Out 模式，数据格式需设置为 **Dash**） | `forza` | [支持] 内置 |
+| BeamNG.drive | UDP **4444**（选项 → 其他 → 启用 OutGauge） | `outgauge` | [支持] 内置 |
+| Live for Speed | UDP **4444**（选项 → 外设 → OutGauge） | `outgauge` | [支持] 内置 |
+| DiRT Rally 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（配置 → 启用 UDP 遥测） | `dirt` + `fields` | [模板] 需字段校准 |
+| F1 22 / 23 / 24 | UDP **20777** | `fields` | [模板] 需字段校准 |
+| Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | [支持] 内置（采用实测偏移定义） |
+| rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | [规划中] |
+| iRacing | 内存映射 SDK | — | [规划中] |
 
 > **说明**：Codemasters 系列（DiRT / F1 / EA WRC）在跨代版本中多次变更报文结构，且同一版本可能混合传输不同长度的数据帧。硬编码偏移极易导致扳机动作异常。因此本项目采用「声明式字段配置（fields）+ 现场抓包校准（sniff）」机制，提供精准适配能力。
 
@@ -271,6 +272,7 @@ go run ./tools/bridgesim -port 9999
 | `bench [-trigger l2\|r2\|both]` | 逐项测试控制器支持的 8 种扳机效果模式 |
 | `watch` | 实时输出控制器上行输入报告解析结果（用于按键映射校准） |
 | `sniff -listen <addr>` | 十六进制转储指定端口接收到的 UDP 遥测数据包（用于字段逆向校准） |
+| `gui [-sim] [-addr <addr>]` | 启动 3D 实时触感视效监视器与交互式测试控制台（自动唤起浏览器） |
 | `version` | 打印工具版本信息 |
 
 ---

@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DualSense 3D 触感视效监视器 - dualsense-c</title>
+  <style>
+    /* design-taste-frontend: 白色主题，以蓝、白、绿、红为主 */
+    :root[data-theme="light"] {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-elevated: #f1f5f9;
+      --surface-subtle: #e2e8f0;
+      --ink: #0f172a;
+      --muted: #475569;
+      --faint: #94a3b8;
+      --accent: #2563eb;          /* 科技蓝 */
+      --accent-ink: #ffffff;
+      --signal-l: #2563eb;        /* 蓝色：左马达低频触感 */
+      --signal-r: #dc2626;        /* 红色：右马达高频后坐 */
+      --success: #16a34a;         /* 绿色：硬件就绪与电量 */
+      --danger: #dc2626;          /* 红色：警示与复位 */
+      --viewport-bg-inner: #ffffff;
+      --viewport-bg-outer: #e2e8f0;
+    }
+
+    :root[data-theme="dark"] {
+      --bg: #090b0e;
+      --surface: #12161c;
+      --surface-elevated: #1a2028;
+      --surface-subtle: #242c37;
+      --ink: #f1f4f8;
+      --muted: #8a96a6;
+      --faint: #434e5e;
+      --accent: #388bfd;
+      --accent-ink: #ffffff;
+      --signal-l: #388bfd;
+      --signal-r: #f85149;
+      --success: #2ea043;
+      --danger: #f85149;
+      --viewport-bg-inner: #161b22;
+      --viewport-bg-outer: #090b0e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", sans-serif;
+      overflow-x: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+      transition: background-color 0.2s, color 0.2s;
+    }
+
+    /* 顶部仪表盘状态栏 */
+    header {
+      background: var(--surface);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--surface-subtle);
+      z-index: 20;
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .brand-sub {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .pill-tag {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--surface-elevated);
+      color: var(--accent);
+    }
+    .pill-tag.sim {
+      color: #d29922;
+      background: rgba(210, 153, 34, 0.12);
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 12.5px;
+    }
+    .metric-chip {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      color: var(--muted);
+    }
+    .metric-chip b {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+      display: inline-block;
+    }
+
+    /* 亮暗色切换按钮 */
+    .theme-toggle-btn {
+      background: var(--surface-elevated);
+      color: var(--ink);
+      border: 1px solid var(--surface-subtle);
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .theme-toggle-btn:hover {
+      background: var(--surface-subtle);
+    }
+
+    /* 主工作台栅格 */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 400px;
+      height: calc(100vh - 56px);
+      position: relative;
+    }
+
+    /* 3D 视口区 */
+    #viewport-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at center, var(--viewport-bg-inner) 0%, var(--viewport-bg-outer) 100%);
+      overflow: hidden;
+    }
+    #three-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .view-hud {
+      position: absolute;
+      top: 20px;
+      left: 24px;
+      background: var(--surface);
+      border: 1px solid var(--surface-subtle);
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 11.5px;
+      color: var(--muted);
+      pointer-events: none;
+      line-height: 1.6;
+    }
+    .view-hud b {
+      color: var(--ink);
+      font-size: 12.5px;
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    /* 握把触感即时指示器 */
+    .haptic-float-dock {
+      position: absolute;
+      bottom: 20px;
+      left: 24px;
+      right: 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      pointer-events: none;
+    }
+    .haptic-card {
+      background: var(--surface);
+      border: 1px solid var(--surface-subtle);
+      border-radius: 6px;
+      padding: 10px 14px;
+    }
+    .haptic-card-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .haptic-track {
+      height: 6px;
+      background: var(--surface-elevated);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .haptic-bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 3px;
+      transition: width 0.05s linear;
+    }
+    #haptic-bar-l { background: var(--signal-l); }
+    #haptic-bar-r { background: var(--signal-r); }
+
+    /* 侧边仪器面板 */
+    .sidebar {
+      background: var(--surface);
+      border-left: 1px solid var(--surface-subtle);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .panel-block {
+      border-bottom: 1px solid var(--surface-subtle);
+      padding: 16px 20px;
+    }
+    .panel-header {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* 扳机状态条 */
+    .trigger-quad {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .trigger-item {
+      background: var(--surface-elevated);
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .trigger-item-title {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .trigger-bar-bg {
+      height: 5px;
+      background: var(--surface-subtle);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .trigger-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      border-radius: 3px;
+      transition: width 0.05s;
+    }
+    .trigger-mode-meta {
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+    }
+
+    /* 实时示波器 Canvas */
+    #oscilloscope {
+      width: 100%;
+      height: 72px;
+      background: var(--surface-elevated);
+      border-radius: 6px;
+      display: block;
+    }
+
+    /* 交互控制器 */
+    .slider-row {
+      margin-bottom: 12px;
+    }
+    .slider-info {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11.5px;
+      margin-bottom: 4px;
+      color: var(--muted);
+    }
+    .slider-info b {
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    input[type="range"] {
+      width: 100%;
+      height: 4px;
+      background: var(--surface-subtle);
+      border-radius: 2px;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+    .mode-actions {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .action-btn {
+      background: var(--surface-elevated);
+      border: 1px solid var(--surface-subtle);
+      color: var(--ink);
+      padding: 6px 4px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.12s;
+    }
+    .action-btn:hover {
+      background: var(--surface-subtle);
+      border-color: var(--muted);
+    }
+    .action-btn:active {
+      transform: scale(0.97);
+    }
+    .action-btn.reset {
+      grid-column: span 3;
+      color: var(--danger);
+      background: rgba(220, 38, 38, 0.08);
+      border-color: rgba(220, 38, 38, 0.25);
+    }
+    .action-btn.reset:hover {
+      background: rgba(220, 38, 38, 0.18);
+    }
+
+    .lightbar-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    input[type="color"] {
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      cursor: pointer;
+      background: transparent;
+    }
+
+    /* 遥测与传感器列表 */
+    .telemetry-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11.5px;
+      padding: 3px 0;
+      color: var(--muted);
+    }
+    .telemetry-row code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+
+  <!-- 使用现代标准原生 importmap 引入 Three.js 和 GLTFLoader -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <header>
+    <div class="brand-group">
+      <div class="brand-title">
+        <span>DualSense 3D</span>
+        <span class="brand-sub">Visualizer & Diagnostic</span>
+      </div>
+      <div id="dev-badge" class="pill-tag">USB 就绪</div>
+    </div>
+    <div class="header-controls">
+      <div class="metric-chip"><span class="status-dot"></span> <b id="fps-counter">60</b> FPS</div>
+      <div class="metric-chip">电量: <b id="battery-val">85%</b></div>
+      <div class="metric-chip"><span id="device-path" style="font-family:monospace;font-size:11px;">/dev/hidrawN</span></div>
+      <button class="theme-toggle-btn" onclick="toggleTheme()">
+        <span id="theme-btn-text">暗色主题</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <div id="viewport-container">
+      <canvas id="three-canvas"></canvas>
+
+      <div class="view-hud">
+        <b>空间体感姿态与音圈触感监视</b>
+        <div>鼠标左键拖拽旋转视口 / 滚轮平滑缩放</div>
+        <div>握把微颤与扩散波纹表示马达实时物理工况</div>
+      </div>
+
+      <!-- 底部马达触感工况条 -->
+      <div class="haptic-float-dock">
+        <div class="haptic-card">
+          <div class="haptic-card-header">
+            <span style="color:var(--signal-l)">Left Motor (低频重击 / 涉水)</span>
+            <span id="val-rumble-l">0</span>
+          </div>
+          <div class="haptic-track"><div id="haptic-bar-l" class="haptic-bar"></div></div>
+        </div>
+        <div class="haptic-card">
+          <div class="haptic-card-header">
+            <span style="color:var(--signal-r)">Right Motor (高频断点 / 金属)</span>
+            <span id="val-rumble-r">0</span>
+          </div>
+          <div class="haptic-track"><div id="haptic-bar-r" class="haptic-bar"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 侧边仪器参数面板 -->
+    <div class="sidebar">
+      
+      <!-- 自适应阻力扳机 -->
+      <div class="panel-block">
+        <div class="panel-header"><span>自适应扳机阻力</span><span>L2 / R2</span></div>
+        <div class="trigger-quad">
+          <div class="trigger-item">
+            <div class="trigger-item-title"><span>L2 瞄准</span><b id="txt-l2">0%</b></div>
+            <div class="trigger-bar-bg"><div id="bar-l2" class="trigger-bar-fill"></div></div>
+            <div class="trigger-mode-meta">模式: <span id="mode-l2">off</span></div>
+          </div>
+          <div class="trigger-item">
+            <div class="trigger-item-title"><span>R2 开火</span><b id="txt-r2">0%</b></div>
+            <div class="trigger-bar-bg"><div id="bar-r2" class="trigger-bar-fill" style="background:var(--signal-r);"></div></div>
+            <div class="trigger-mode-meta">模式: <span id="mode-r2">off</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 触感波形示波器 -->
+      <div class="panel-block">
+        <div class="panel-header"><span>实时触感示波管</span><span>60 Hz</span></div>
+        <canvas id="oscilloscope" width="360" height="72"></canvas>
+      </div>
+
+      <!-- 硬件力反馈交互控制台 -->
+      <div class="panel-block">
+        <div class="panel-header"><span>力反馈交互测试</span><span>控制下发</span></div>
+        
+        <div class="slider-row">
+          <div class="slider-info"><span>左马达强度 (0~255)</span><b id="lbl-test-l">0</b></div>
+          <input type="range" id="rng-test-l" min="0" max="255" value="0" oninput="sendRumble()">
+        </div>
+        
+        <div class="slider-row">
+          <div class="slider-info"><span>右马达强度 (0~255)</span><b id="lbl-test-r">0</b></div>
+          <input type="range" id="rng-test-r" min="0" max="255" value="0" oninput="sendRumble()">
+        </div>
+
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">8 种扳机模式快捷下发：</div>
+        <div class="mode-actions">
+          <button class="action-btn" onclick="sendTrigger('feedback')">瞄准挡墙</button>
+          <button class="action-btn" onclick="sendTrigger('weapon')">枪机击锤</button>
+          <button class="action-btn" onclick="sendTrigger('vibration')">高频震颤</button>
+          <button class="action-btn" onclick="sendTrigger('rigid')">刚性阻尼</button>
+          <button class="action-btn" onclick="sendTrigger('slope_feedback')">斜坡阻尼</button>
+          <button class="action-btn" onclick="sendTrigger('machine')">连发脉冲</button>
+          <button class="action-btn reset" onclick="resetAll()">重置全部通道输出</button>
+        </div>
+
+        <div class="lightbar-row">
+          <input type="color" id="picker-rgb" value="#0066cc" onchange="sendLight()">
+          <div>
+            <div style="font-size:12px;font-weight:600;">RGB 导光灯条调色</div>
+            <div style="font-size:11px;color:var(--muted);">选择颜色实时写入物理控制器 Lightbar</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 姿态与传感器参数列表 -->
+      <div class="panel-block" style="flex:1;">
+        <div class="panel-header"><span>传感器遥测</span><span>6-DOF IMU</span></div>
+        <div class="telemetry-row"><span>陀螺仪 Gyro (X/Y/Z)</span><code id="sen-gyro">+0.00 / +0.00 / +0.00</code></div>
+        <div class="telemetry-row"><span>加速度 Accel (X/Y/Z)</span><code id="sen-accel">+0.00 / +0.00 / +0.00</code></div>
+        <div class="telemetry-row"><span>触控板 (Contact & Coords)</span><code id="sen-touch">未接触 (0.00, 0.00)</code></div>
+        <div class="telemetry-row"><span>摇杆 Stick L / R</span><code id="sen-sticks">(+0.0, +0.0) | (+0.0, +0.0)</code></div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    // ================= 全局状态与接口 =================
+    let state = {
+      connected: false,
+      input: { L2: 0, R2: 0, LX: 0, LY: 0, RX: 0, RY: 0, GyroX: 0, GyroY: 0, GyroZ: 0, Battery: 0.85, Charging: false },
+      output: { RumbleL: 0, RumbleR: 0, Lightbar: [0, 102, 204] },
+      l2_mode_name: 'off',
+      r2_mode_name: 'off'
+    };
+
+    let currentTheme = localStorage.getItem('ds5_theme') || 'light';
+    document.documentElement.setAttribute('data-theme', currentTheme);
+    updateThemeBtn();
+
+    function toggleTheme() {
+      currentTheme = (currentTheme === 'light' ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', currentTheme);
+      localStorage.setItem('ds5_theme', currentTheme);
+      updateThemeBtn();
+      if (window.onThemeChanged) window.onThemeChanged(currentTheme);
+    }
+
+    function updateThemeBtn() {
+      const btn = document.getElementById('theme-btn-text');
+      if (btn) btn.innerText = (currentTheme === 'light' ? '暗色主题' : '明色主题');
+    }
+
+    const evtSource = new EventSource('/events');
+    evtSource.onmessage = function(e) {
+      try {
+        state = JSON.parse(e.data);
+        renderState(state);
+      } catch (err) {}
+    };
+
+    function renderState(s) {
+      document.getElementById('txt-l2').innerText = Math.round(s.input.L2 * 100) + '%';
+      document.getElementById('bar-l2').style.width = Math.round(s.input.L2 * 100) + '%';
+      document.getElementById('mode-l2').innerText = s.l2_mode_name || 'off';
+
+      document.getElementById('txt-r2').innerText = Math.round(s.input.R2 * 100) + '%';
+      document.getElementById('bar-r2').style.width = Math.round(s.input.R2 * 100) + '%';
+      document.getElementById('mode-r2').innerText = s.r2_mode_name || 'off';
+
+      document.getElementById('val-rumble-l').innerText = s.output.RumbleL;
+      document.getElementById('haptic-bar-l').style.width = (s.output.RumbleL / 255 * 100) + '%';
+
+      document.getElementById('val-rumble-r').innerText = s.output.RumbleR;
+      document.getElementById('haptic-bar-r').style.width = (s.output.RumbleR / 255 * 100) + '%';
+
+      document.getElementById('battery-val').innerText = Math.round(s.input.Battery * 100) + '%' + (s.input.Charging ? ' [充电中]' : '');
+      document.getElementById('device-path').innerText = s.device_name || '';
+
+      if (s.is_sim) {
+        document.getElementById('dev-badge').innerText = '仿真模式 (无硬件)';
+        document.getElementById('dev-badge').className = 'pill-tag sim';
+      }
+
+      document.getElementById('sen-gyro').innerText = 
+        fmtSign(s.input.GyroX) + ' / ' + fmtSign(s.input.GyroY) + ' / ' + fmtSign(s.input.GyroZ);
+      document.getElementById('sen-accel').innerText = 
+        fmtSign(s.input.AccelX) + ' / ' + fmtSign(s.input.AccelY) + ' / ' + fmtSign(s.input.AccelZ);
+      
+      document.getElementById('sen-touch').innerText = s.input.TouchActive 
+        ? ('接触中 (' + s.input.TouchX.toFixed(2) + ', ' + s.input.TouchY.toFixed(2) + ')')
+        : '未接触';
+
+      document.getElementById('sen-sticks').innerText = 
+        '(' + fmtSign(s.input.LX) + ',' + fmtSign(s.input.LY) + ') | (' + fmtSign(s.input.RX) + ',' + fmtSign(s.input.RY) + ')';
+    }
+
+    function fmtSign(v) { return (v >= 0 ? '+' : '') + (v || 0).toFixed(2); }
+
+    // ================= 触感示波器 (Oscilloscope) =================
+    const oscCanvas = document.getElementById('oscilloscope');
+    const oscCtx = oscCanvas.getContext('2d');
+    const oscHistoryL = new Array(80).fill(0);
+    const oscHistoryR = new Array(80).fill(0);
+
+    function drawOscilloscope() {
+      oscHistoryL.shift();
+      oscHistoryL.push(state.output.RumbleL / 255);
+      oscHistoryR.shift();
+      oscHistoryR.push(state.output.RumbleR / 255);
+
+      const isLight = (currentTheme === 'light');
+      oscCtx.fillStyle = isLight ? '#f1f5f9' : '#141a22';
+      oscCtx.fillRect(0, 0, oscCanvas.width, oscCanvas.height);
+
+      oscCtx.strokeStyle = isLight ? '#cbd5e1' : '#242c37';
+      oscCtx.lineWidth = 1;
+      oscCtx.beginPath();
+      oscCtx.moveTo(0, 36); oscCtx.lineTo(oscCanvas.width, 36);
+      oscCtx.stroke();
+
+      // Left Channel (科技蓝)
+      oscCtx.strokeStyle = isLight ? '#2563eb' : '#388bfd';
+      oscCtx.lineWidth = 2;
+      oscCtx.beginPath();
+      for (let i = 0; i < oscHistoryL.length; i++) {
+        const x = (i / (oscHistoryL.length - 1)) * oscCanvas.width;
+        const y = 36 - oscHistoryL[i] * 32;
+        if (i === 0) oscCtx.moveTo(x, y); else oscCtx.lineTo(x, y);
+      }
+      oscCtx.stroke();
+
+      // Right Channel (警戒红)
+      oscCtx.strokeStyle = isLight ? '#dc2626' : '#f85149';
+      oscCtx.lineWidth = 2;
+      oscCtx.beginPath();
+      for (let i = 0; i < oscHistoryR.length; i++) {
+        const x = (i / (oscHistoryR.length - 1)) * oscCanvas.width;
+        const y = 36 + oscHistoryR[i] * 32;
+        if (i === 0) oscCtx.moveTo(x, y); else oscCtx.lineTo(x, y);
+      }
+      oscCtx.stroke();
+
+      requestAnimationFrame(drawOscilloscope);
+    }
+    requestAnimationFrame(drawOscilloscope);
+
+    function sendRumble() {
+      const l = parseInt(document.getElementById('rng-test-l').value);
+      const r = parseInt(document.getElementById('rng-test-r').value);
+      document.getElementById('lbl-test-l').innerText = l;
+      document.getElementById('lbl-test-r').innerText = r;
+      postCommand({ type: 'test_rumble', rumble_l: l, rumble_r: r });
+    }
+
+    function sendTrigger(mode) {
+      let params = {};
+      if (mode === 'feedback') params = { start: 0, strength: 4, force: 160 };
+      if (mode === 'weapon') params = { start: 2, amp_a: 180, amp_b: 255, freq: 20 };
+      if (mode === 'rigid') params = { start: 1, force: 200 };
+      if (mode === 'vibration') params = { start: 1, amplitude: 200, freq: 24 };
+      if (mode === 'machine') params = { start: 1, end: 9, freq: 16, period: 3 };
+      if (mode === 'slope_feedback') params = { start: 1, end: 8, start_force: 30, end_force: 220 };
+
+      postCommand({
+        type: 'test_trigger',
+        l2_effect: { mode: mode, params: params },
+        r2_effect: { mode: mode, params: params }
+      });
+    }
+
+    function sendLight() {
+      const hex = document.getElementById('picker-rgb').value;
+      const r = parseInt(hex.substr(1, 2), 16);
+      const g = parseInt(hex.substr(3, 2), 16);
+      const b = parseInt(hex.substr(5, 2), 16);
+      postCommand({ type: 'test_light', lightbar: [r, g, b] });
+    }
+
+    function resetAll() {
+      document.getElementById('rng-test-l').value = 0;
+      document.getElementById('rng-test-r').value = 0;
+      document.getElementById('lbl-test-l').innerText = '0';
+      document.getElementById('lbl-test-r').innerText = '0';
+      postCommand({ type: 'reset' });
+    }
+
+    function postCommand(cmd) {
+      fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cmd)
+      }).catch(err => console.error('Command failed:', err));
+    }
+  </script>
+
+  <!-- ================= 3D 核心模块 (Module 模式加载真实 DualSense GLB) ================= -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const container = document.getElementById('viewport-container');
+    const canvas = document.getElementById('three-canvas');
+
+    let renderer, scene, camera;
+    let controllerRoot, lightbarMesh, stickLMesh, stickRMesh, l2TriggerMesh, r2TriggerMesh;
+    let waveRingsL = [], waveRingsR = [];
+    let ambLight, dirLight, rimLight;
+
+    function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(40, container.clientWidth / container.clientHeight, 0.1, 100);
+      camera.position.set(0, 1.5, 5.0);
+      camera.lookAt(0, 0, 0);
+
+      renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+
+      // 高级工业摄影光影
+      ambLight = new THREE.AmbientLight(0xffffff, 1.3);
+      scene.add(ambLight);
+      dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      dirLight.position.set(5, 10, 8);
+      scene.add(dirLight);
+      rimLight = new THREE.PointLight(0x2563eb, 2.5, 12);
+      rimLight.position.set(-4, -1, 4);
+      scene.add(rimLight);
+
+      controllerRoot = new THREE.Group();
+      scene.add(controllerRoot);
+
+      // 加载原厂精度 3D DualSense 模型
+      const loader = new GLTFLoader();
+      loader.load('/dualsense.glb', function(gltf) {
+        const model = gltf.scene;
+        // 适当适度比例缩放，确保手柄四周拥有舒展呼吸感
+        model.scale.set(0.95, 0.95, 0.95);
+        model.position.set(0, -0.25, 0);
+        model.rotation.x = 0.22; // 迎向视口的角度
+
+        // 遍历设置高质量 PBR 材质表现
+        model.traverse(child => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            if (child.material) {
+              child.material.roughness = 0.35;
+            }
+          }
+        });
+
+        // 提取精确可动部件
+        stickLMesh = model.getObjectByName('left-stick__head-and-shaft__Object_16_0');
+        stickRMesh = model.getObjectByName('right-stick__head-and-shaft__Object_16_1');
+        l2TriggerMesh = model.getObjectByName('l2__trigger__Object_59_0');
+        r2TriggerMesh = model.getObjectByName('r2__trigger__Object_59_1');
+        lightbarMesh = model.getObjectByName('lights__touchpad-surround__Object_46_0');
+
+        if (lightbarMesh) {
+          lightbarMesh.material = new THREE.MeshBasicMaterial({ color: 0x0066cc });
+        }
+
+        controllerRoot.add(model);
+        console.log('DualSense 3D GLB Model loaded successfully');
+      }, undefined, function(err) {
+        console.error('Failed to load dualsense.glb:', err);
+      });
+
+      // 左右握把能量光环 (Shockwaves)，匹配缩放后的握把位置
+      const ringGeo = new THREE.RingGeometry(0.32, 0.45, 32);
+      for (let i = 0; i < 3; i++) {
+        // 左马达 (科技蓝)
+        const ringMatL = new THREE.MeshBasicMaterial({ color: 0x2563eb, side: THREE.DoubleSide, transparent: true, opacity: 0 });
+        const ringL = new THREE.Mesh(ringGeo, ringMatL);
+        ringL.position.set(-0.95, -0.35, 0.25);
+        ringL.rotation.x = Math.PI / 2;
+        scene.add(ringL);
+        waveRingsL.push({ mesh: ringL, phase: i * 0.33 });
+
+        // 右马达 (警戒红)
+        const ringMatR = new THREE.MeshBasicMaterial({ color: 0xdc2626, side: THREE.DoubleSide, transparent: true, opacity: 0 });
+        const ringR = new THREE.Mesh(ringGeo, ringMatR);
+        ringR.position.set(0.95, -0.35, 0.25);
+        ringR.rotation.x = Math.PI / 2;
+        scene.add(ringR);
+        waveRingsR.push({ mesh: ringR, phase: i * 0.33 });
+      }
+
+      window.addEventListener('resize', onResize);
+      setupControls();
+      animate();
+    }
+
+    window.onThemeChanged = function(theme) {
+      if (!scene || !ambLight) return;
+      const isLight = (theme === 'light');
+      ambLight.intensity = isLight ? 1.4 : 0.8;
+      dirLight.intensity = isLight ? 1.8 : 1.2;
+      rimLight.intensity = isLight ? 1.5 : 2.5;
+    };
+
+    let isMouseDown = false, prevMouseX = 0, prevMouseY = 0;
+    let manualRotY = 0, manualRotX = 0;
+
+    function setupControls() {
+      container.addEventListener('mousedown', e => {
+        isMouseDown = true;
+        prevMouseX = e.clientX;
+        prevMouseY = e.clientY;
+      });
+      window.addEventListener('mouseup', () => { isMouseDown = false; });
+      window.addEventListener('mousemove', e => {
+        if (!isMouseDown) return;
+        const dx = e.clientX - prevMouseX;
+        const dy = e.clientY - prevMouseY;
+        manualRotY += dx * 0.008;
+        manualRotX += dy * 0.008;
+        prevMouseX = e.clientX;
+        prevMouseY = e.clientY;
+      });
+      // 滚轮平滑缩放视距
+      container.addEventListener('wheel', e => {
+        e.preventDefault();
+        camera.position.z += e.deltaY * 0.004;
+        if (camera.position.z < 3.0) camera.position.z = 3.0;
+        if (camera.position.z > 8.0) camera.position.z = 8.0;
+      }, { passive: false });
+    }
+
+    function onResize() {
+      if (!renderer || !camera) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    let clock = 0;
+    function animate() {
+      requestAnimationFrame(animate);
+      clock += 0.016;
+
+      if (!controllerRoot) return;
+
+      // 1. 真实体感姿态联动 (6 轴 IMU)
+      const targetX = ((state.input.GyroX || 0) * 0.35 + 0.15) + manualRotX;
+      const targetY = ((state.input.GyroY || 0) * 0.35) + manualRotY;
+      const targetZ = -(state.input.GyroZ || 0) * 0.35;
+      controllerRoot.rotation.x += (targetX - controllerRoot.rotation.x) * 0.1;
+      controllerRoot.rotation.y += (targetY - controllerRoot.rotation.y) * 0.1;
+      controllerRoot.rotation.z += (targetZ - controllerRoot.rotation.z) * 0.1;
+
+      // 2. 音圈马达高频微抖动 (Jitter)
+      const ampL = (state.output.RumbleL || 0) / 255;
+      const ampR = (state.output.RumbleR || 0) / 255;
+      if (ampL > 0 || ampR > 0) {
+        controllerRoot.position.y = (Math.sin(clock * 110) * 0.02 * Math.max(ampL, ampR));
+      } else {
+        controllerRoot.position.y = 0;
+      }
+
+      // 3. 摇杆动态偏转
+      if (stickLMesh) {
+        stickLMesh.rotation.z = -(state.input.LX || 0) * 0.35;
+        stickLMesh.rotation.x = (state.input.LY || 0) * 0.35;
+      }
+      if (stickRMesh) {
+        stickRMesh.rotation.z = -(state.input.RX || 0) * 0.35;
+        stickRMesh.rotation.x = (state.input.RY || 0) * 0.35;
+      }
+
+      // 4. L2 / R2 扳机行程动态偏转
+      if (l2TriggerMesh) {
+        l2TriggerMesh.rotation.x = (state.input.L2 || 0) * 0.35;
+      }
+      if (r2TriggerMesh) {
+        r2TriggerMesh.rotation.x = (state.input.R2 || 0) * 0.35;
+      }
+
+      // 5. RGB 导光灯条发光
+      if (lightbarMesh && state.output.Lightbar) {
+        const rgb = state.output.Lightbar;
+        lightbarMesh.material.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
+      }
+
+      // 6. 左右震动波纹能量环动画
+      waveRingsL.forEach(r => {
+        if (ampL > 0.05) {
+          r.phase = (r.phase + 0.04) % 1.0;
+          r.mesh.scale.setScalar(1.0 + r.phase * 1.5 * ampL);
+          r.mesh.material.opacity = (1.0 - r.phase) * ampL * 0.85;
+        } else {
+          r.mesh.material.opacity = 0;
+        }
+      });
+      waveRingsR.forEach(r => {
+        if (ampR > 0.05) {
+          r.phase = (r.phase + 0.04) % 1.0;
+          r.mesh.scale.setScalar(1.0 + r.phase * 1.5 * ampR);
+          r.mesh.material.opacity = (1.0 - r.phase) * ampR * 0.85;
+        } else {
+          r.mesh.material.opacity = 0;
+        }
+      });
+
+      renderer.render(scene, camera);
+    }
+
+    init();
+  </script>
+</body>
+</html>

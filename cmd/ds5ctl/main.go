@@ -49,6 +49,8 @@ func main() {
 		err = cmdWatch(os.Args[2:])
 	case "sniff":
 		err = cmdSniff(os.Args[2:])
+	case "gui", "web":
+		err = cmdGUI(os.Args[2:])
 	case "version", "-version", "--version":
 		fmt.Printf("ds5ctl %s\n", version)
 	default:
@@ -71,6 +73,7 @@ func usage() {
   bench      cycle every trigger effect so you can pick the right one
   watch      print decoded input reports (calibrates button bits)
   sniff      hexdump incoming game telemetry (calibrates UDP offsets)
+  gui        3D real-time visualizer & interactive hardware test console
   version    print the build version
 `)
 }

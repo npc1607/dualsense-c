@@ -5,6 +5,14 @@
 
 ## Unreleased
 
+### 文档
+- 新增 `docs/audio-ai-haptics.md`：音频 AI 的接入步骤、推理流程（生命周期/窗口/
+  类别映射）、HD 触感的三条触发通路、信号与参数、标定方法、延迟预算、调优速查
+- 新增流程图 `docs/audio-ai-flow.svg`（推理管线）与 `docs/audio-ai-hd.svg`
+  （三条触感通路），由 `scripts/generate_audio_ai_flow.js` 生成
+- README：延伸阅读加入新文档、`haptics` 块补充 `mode/low_hz/high_hz`、
+  信号表补充 `onset` 与 AI 材质/事件信号、目录结构补充 `internal/audioai`
+
 ### 修复：音圈（Voice-Coil）终于通了
 - **根因**：`valid_flag0` 是「应用掩码」。ds5d 每 8ms 都写
   `COMPATIBLE_VIBRATION|HAPTICS_SELECT`（BIT0+BIT1）而 motor 字节为 0，

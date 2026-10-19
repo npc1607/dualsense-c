@@ -1,0 +1,243 @@
+# Far Far West（遥遥西土）—— HD 触觉反馈版
+#
+# 设计目标：不是"加震动"，而是让手柄变成能感知材质与事件的触觉设备。
+#
+# 三条通路各司其职：
+#
+#   1. 音圈（HD，被动感受）
+#      haptics.mode: passthrough —— 把游戏音频 25–200Hz 的频段直接送进
+#      左右音圈。音圈重放的是**游戏自己的波形**，所以踩到碎石、铁板、
+#      水面、木板的质感是真实的，不是我们用固定载波"演"出来的。
+#      规则里的 haptic_left/right 只当**增益**用：决定此刻把多少真实
+#      纹理送进哪一侧音圈。
+#
+#   2. 马达（体量）
+#      枪声、爆炸的低频"咚"由大电机给，音圈负责细节。
+#
+#   3. 扳机（操作感）
+#      L2 瞄准挡墙 + R2 开火二段式，全部用 rigid（本固件上实测唯一
+#      有明确手感的模式）。
+#
+# 瞬态判定用 onset 信号（fast/slow 包络差），对背景音乐免疫。
+#
+# 依赖：
+#   make build-onnx                 # 需要 onnxruntime-cpu
+#   models/yamnet.onnx + class map  # 见 README
+#
+# 运行：
+#   ./bin/ds5d-onnx -profiles ./profiles -profile far-far-west-hd -rate 125 -trace
+name: far-far-west-hd
+title: Far Far West（HD 触觉反馈：音圈直通 + 自适应扳机）
+description: |
+  音圈直通游戏低频 → 真实材质纹理；马达给枪声/爆炸体量；
+  L2 瞄准挡墙、R2 二段式开火；AI 识别材质与战况事件。
+
+source:
+  type: combo
+  parts:
+    - type: trigger
+      rate_hz: 125
+
+    - type: audio
+      target: auto
+      rate: 16000
+      channels: 2
+      format: float32le
+      model: models/yamnet.onnx
+      class_map: models/yamnet_class_map.csv
+      classify_ms: 120       # AI 10 次/秒
+      threads: 4
+      ai_debug: false        # 调试时可开
+      env_debug: false
+      rate_hz: 60
+      gain: 1.5
+      bass_hz: "20,110"
+      mid_hz: "160,450"
+
+haptics:
+  mode: passthrough          # 关键：音圈重放真实音频，而不是合成载波
+  target: auto
+  source: auto               # 采集默认输出的 monitor
+  low_hz: 55                 # 再抬高：彻底避开脚步/引擎的低频区
+  high_hz: 200               # 上限（碎石/金属的"脆"在这里）
+  gain: 0.7                  # 通带放大（0.85 仍嫌强，继续降）
+
+safety:
+  signal_ttl: 500ms
+  release: 120ms
+  status_lightbar: false
+
+rules:
+  # 走路持续震的两个来源都已移除：
+  #   1. 常驻底纹（试过 45 / 18，脚步能量正好在音圈通带里）
+  #   2. 四条材质音圈规则（AI 把走路声认成材质时会一直给增益）
+  # 现在音圈只在**事件**（开枪/命中/爆炸）瞬间出力，平时完全静默。
+  # ======================================================================
+  # 材质 → 音圈增益（纹理来自音频本身，这里只决定"送多少、送哪侧"）
+  # ======================================================================
+  # ======================================================================
+  # 瞬态（开枪、命中、爆炸的起音）：两路一起给，几十毫秒内到手
+  # ======================================================================
+  - name: transient-coil
+    when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
+    target: haptic_right
+    priority: 45
+    hold: 85ms
+    value: "255"
+
+  - name: transient-coil-l
+    when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
+    target: haptic_left
+    priority: 45
+    hold: 85ms
+    value: "245"
+
+  - name: transient-motor
+    when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
+    target: rumble_right
+    priority: 45
+    hold: 85ms
+    value: "clamp(500 * onset + 120, 140, 250)"
+    modulate: { type: square, hz: 26, depth: 0.5 }
+
+  - name: transient-body
+    when: 'has("onset") && onset > 0.55 && loudness > 0.35 && r2 < 0.80'
+    target: rumble_left
+    priority: 45
+    hold: 85ms
+    value: "clamp(420 * onset + 100, 120, 240)"
+
+  # ======================================================================
+  # AI 确认的事件（比包络更准，晚 100~200ms，用来加强）
+  # ======================================================================
+  - name: gunshot-coil
+    when: 'crossed("audio_gunshot", 0.30) && r2 < 0.80'
+    target: haptic_right
+    priority: 55
+    hold: 90ms
+    value: "255"
+
+  - name: gunshot-motor
+    when: 'crossed("audio_gunshot", 0.30) && r2 < 0.80'
+    target: rumble_right
+    priority: 55
+    hold: 90ms
+    value: "245"
+    modulate: { type: square, hz: 24, depth: 0.45 }
+
+  - name: gunshot-body
+    when: 'crossed("audio_gunshot", 0.30) && r2 < 0.80'
+    target: rumble_left
+    priority: 55
+    hold: 90ms
+    value: "230"
+
+  - name: explosion-coil
+    when: 'crossed("audio_explosion", 0.30)'
+    target: haptic_left
+    priority: 65
+    hold: 180ms
+    value: "255"
+
+  - name: explosion-motor
+    when: 'crossed("audio_explosion", 0.30)'
+    target: rumble_left
+    priority: 65
+    hold: 180ms
+    value: "255"
+    modulate: { type: sine, hz: 22, depth: 0.6 }
+
+  # ======================================================================
+  # 扳机：L2 瞄准挡墙 / R2 二段式开火（rigid，实测唯一有效模式）
+  # ======================================================================
+  - name: l2-pull
+    when: "l2 > 0.02 && l2 < 0.45"
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "90"
+
+  - name: l2-wall
+    when: "l2 >= 0.45"
+    target: l2
+    effect: rigid
+    priority: 20
+    params:
+      start: "4"
+      force: "235"
+
+  - name: r2-pull
+    when: "r2 > 0.02 && r2 < 0.70"
+    target: r2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "110"
+
+  - name: r2-wall
+    when: "r2 >= 0.70 && r2 < 0.97"
+    target: r2
+    effect: rigid
+    priority: 20
+    params:
+      start: "6"
+      force: "255"
+
+  # 击发瞬间给扳机一个机械"咔哒"（射手里最提手感的一下）
+  - name: r2-mech-click
+    when: 'pressed("r2_full")'
+    target: r2
+    effect: weapon
+    priority: 40
+    hold: 80ms
+    params:
+      start: "6"
+      amp_a: "210"
+      amp_b: "130"
+      freq: "24"
+
+  - name: r2-fired
+    when: "r2 >= 0.97"
+    target: r2
+    effect: off
+    priority: 30
+
+  # 按住不放时的连发节奏（扳机位置判定，不依赖音频）
+  # 按住期间只留这一条节奏（14Hz ≈ 840 发/分），不再叠加瞬态与 AI 两路，
+  # 否则三种频率互相打架，加特林会显得"抖得没规律"。
+  - name: auto-fire-motor
+    when: "r2 > 0.80"
+    target: rumble_right
+    priority: 48
+    hold: 80ms
+    value: "220"
+    modulate: { type: square, hz: 14, depth: 0.92 }
+
+  - name: auto-fire-motor-l
+    when: "r2 > 0.80"
+    target: rumble_left
+    priority: 48
+    hold: 80ms
+    value: "205"
+    modulate: { type: square, hz: 14, depth: 0.85 }
+
+  - name: auto-fire-coil
+    when: "r2 > 0.80"
+    target: haptic_right
+    priority: 48
+    hold: 80ms
+    value: "250"
+
+  # ======================================================================
+  # 灯条：开枪闪白、瞄准偏蓝、材质偏青
+  # ======================================================================
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(255 * audio_gunshot, 0, 255)"
+      g: "clamp(40 + 160 * l2, 0, 200)"
+      b: "clamp(60 + 160 * surface_water, 0, 220)"

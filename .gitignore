@@ -4,3 +4,6 @@ dist/
 .DS_Store
 *.log
 /tmp/
+
+# YAMNet model weights (download separately, ~16 MB)
+models/

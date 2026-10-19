@@ -60,7 +60,7 @@
     <text class="card-sub" x="160" y="56" text-anchor="middle">internal/source</text>
     <line x1="25" y1="72" x2="295" y2="72" stroke="#b2f2bb" stroke-width="1.5" stroke-dasharray="4,4"/>
     <g class="card-item" transform="translate(24, 102)">
-      <text y="0">• 支持类型: trigger / udp / sim</text>
+      <text y="0">• 支持类型: trigger / udp / audio_ai / sim</text>
       <text y="28">• 原始遥测协议解码与动态字段解析</text>
       <text y="56">• 扳机按键行程采样与时间戳记录</text>
       <text y="84">• 数据刷新率控制与异常容错保护</text>
@@ -154,7 +154,7 @@
     <line x1="30" y1="74" x2="1050" y2="74" stroke="#ffc9c9" stroke-width="1.5" stroke-dasharray="4,4"/>
     
     <g class="card-item" transform="translate(35, 104)" font-size="15">
-      <text y="0">• <tspan font-weight="700">source 块</tspan>：声明输入源类型 (trigger / udp / sim)、监听端口、内置解码器 (forza / outgauge / dirt) 与动态字段偏移</text>
+      <text y="0">• <tspan font-weight="700">source 块</tspan>：声明输入源类型 (trigger / udp / audio_ai / sim)、监听端口、内置解码器与动态字段偏移</text>
       <text y="28">• <tspan font-weight="700">shape 块</tspan>：配置各物理信号的死区 (deadzone)、非线性响应曲线 (gamma) 以及上升/下降平滑速率 (slew rate)</text>
       <text y="56">• <tspan font-weight="700">rules 块</tspan>：声明触发条件 when (Expr 表达式)、目标部件、扳机模式 (rigid / feedback / weapon) 与优先级 priority</text>
     </g>

@@ -1,0 +1,183 @@
+# 进程内 YAMNet 推理 → HD 音圈 + 马达（不需要 Python）
+#
+# 构建（需要 onnxruntime-cpu）：
+#   sudo pacman -S onnxruntime-cpu
+#   make build-onnx                 # 生成 bin/ds5d-onnx
+# 模型（~16MB，不入库）：
+#   mkdir -p models
+#   curl -L -o models/yamnet.onnx https://huggingface.co/niobures/YAMNet/resolve/main/yamnetonnx/yamnet.onnx
+#   curl -L -o models/yamnet_class_map.csv https://huggingface.co/niobures/YAMNet/resolve/main/yamnetonnx/yamnet_class_map.csv
+#
+# 运行：
+#   ./bin/ds5d-onnx -profiles ./profiles -profile audio-ai-yamnet -rate 125 -trace
+#
+# 标定：加 source.ai_debug: true 会每 0.5s 打印 YAMNet 的 top-3 类别，
+# 用来确认游戏里到底命中了哪些类、置信度多少，再据此调门槛。
+name: audio-ai-yamnet
+title: YAMNet 音频 AI → HD 音圈触感（进程内推理）
+description: |
+  进程内运行 YAMNet（ONNX Runtime C API，无 Python）：识别地面材质与战况音效，
+  分别驱动音圈（材质细节）与马达（体量），并用扳机做瞄具挡墙。
+
+# combo：扳机源提供 l2（瞄具挡墙），音频源跑 YAMNet（材质/事件）。
+# 只写 audio 源会让 l2 恒为 0，挡墙永久顶住扳机 —— 这个坑踩过一次。
+source:
+  type: combo
+  parts:
+    - type: trigger
+      rate_hz: 125
+    - type: audio
+      target: auto
+      rate: 16000            # YAMNet 只接受 16kHz
+      channels: 2
+      format: float32le
+      model: models/yamnet.onnx
+      class_map: models/yamnet_class_map.csv
+      classify_ms: 120       # 10 次/秒（YAMNet 窗口仍为 1s，无法更短）
+      threads: 4
+      ai_debug: true         # 打印 top-3 类别（标定用；稳定后可关）
+      env_debug: true        # 每秒打印包络峰值（标定门槛用）
+      rate_hz: 60
+      gain: 1.5             # 实测游戏内 loudness 会饱和到 1.0，降一点留出动态范围
+      bass_hz: "20,110"
+      mid_hz: "160,450"
+
+haptics:
+  target: auto
+  carrier_hz: 55
+  gain: 0.9
+
+safety:
+  signal_ttl: 700ms
+  release: 250ms
+  status_lightbar: false
+
+rules:
+  # ---- 材质 → 音圈（HD）：不同调幅频率造出不同"质地" --------------------
+  - name: water-coil
+    when: 'has("surface_water") && surface_water > 0.20 && surface_water >= surface_metal && surface_water >= surface_wood && surface_water >= surface_gravel'
+    target: haptic_right
+    priority: 20
+    value: "clamp(240 * surface_water, 0, 220)"
+    modulate: { type: sine, hz: 42, depth: 0.55 }
+
+  - name: metal-coil
+    when: 'has("surface_metal") && surface_metal > 0.20 && surface_metal >= surface_water && surface_metal >= surface_wood && surface_metal >= surface_gravel'
+    target: haptic_right
+    priority: 20
+    value: "clamp(255 * surface_metal, 0, 235)"
+    modulate: { type: square, hz: 58, depth: 0.8 }
+
+  - name: wood-coil
+    when: 'has("surface_wood") && surface_wood > 0.20 && surface_wood >= surface_water && surface_wood >= surface_metal && surface_wood >= surface_gravel'
+    target: haptic_left
+    priority: 20
+    value: "clamp(230 * surface_wood, 0, 210)"
+    modulate: { type: sine, hz: 34, depth: 0.6 }
+
+  - name: gravel-coil
+    when: 'has("surface_gravel") && surface_gravel > 0.20 && surface_gravel >= surface_water && surface_gravel >= surface_metal && surface_gravel >= surface_wood'
+    target: haptic_left
+    priority: 20
+    value: "clamp(245 * surface_gravel, 0, 225)"
+    modulate: { type: square, hz: 48, depth: 0.75 }
+
+  - name: gravel-motor
+    when: 'has("surface_gravel") && surface_gravel > 0.30 && surface_gravel >= surface_water && surface_gravel >= surface_metal && surface_gravel >= surface_wood'
+    target: rumble_left
+    priority: 15
+    value: "clamp(150 * surface_gravel, 0, 130)"
+    modulate: { type: square, hz: 30, depth: 0.7 }
+
+  # ======================================================================
+  # 战况事件：分两路
+  #   起音（看得见的延迟 ~20ms）  ← loudness/bass 包络
+  #   确认与补强（~1s 后到位）    ← YAMNet 分类
+  # YAMNet 的窗口是 1 秒，纯靠它做枪声必然延迟；包络负责"立刻有反应"。
+  # ======================================================================
+  # 边沿触发：pressed() 只在 loudness 从 <0.5 跳到 >=0.5 的那一帧为真。
+  # 之前用电平判断（>0.25），背景音乐常年过线 -> 一直震（"傻震"就是这个）。
+  # 用 onset 信号（fast/slow 包络差）而不是绝对音量：游戏音乐会把 loudness
+  # 压到饱和 1.0，绝对阈值要么一直触发、要么永不触发。
+  - name: onset-haptic
+    when: 'has("onset") && onset > 0.25'
+    target: haptic_right
+    priority: 30
+    hold: 90ms
+    value: "clamp(600 * onset + 90, 90, 245)"
+
+  # 实测：枪声能量在 loudness（宽带瞬态），bass 只有 0.016；
+  # 所以瞬态两路都用 loudness，bass 只留给爆炸的低频体感。
+  - name: onset-motor
+    when: 'has("onset") && onset > 0.25'
+    target: rumble_right
+    priority: 30
+    hold: 90ms
+    value: "clamp(500 * onset + 120, 140, 255)"
+    modulate: { type: square, hz: 28, depth: 0.5 }
+
+  # ---- 战况事件（AI 确认后加强）-----------------------------------------
+  - name: gunshot-coil
+    when: 'has("audio_gunshot") && audio_gunshot > 0.12'
+    target: haptic_right
+    priority: 55
+    hold: 110ms
+    value: "255"
+
+  - name: gunshot-motor
+    when: 'has("audio_gunshot") && audio_gunshot > 0.12'
+    target: rumble_right
+    priority: 55
+    hold: 110ms
+    value: "235"
+    modulate: { type: square, hz: 26, depth: 0.5 }
+
+  - name: gunshot-body
+    when: 'has("audio_gunshot") && audio_gunshot > 0.12'
+    target: rumble_left
+    priority: 55
+    hold: 100ms
+    value: "220"
+
+  - name: explosion-coil
+    when: 'has("audio_explosion") && audio_explosion > 0.12'
+    target: haptic_left
+    priority: 65
+    hold: 260ms
+    value: "255"
+
+  - name: explosion-motor
+    when: 'has("audio_explosion") && audio_explosion > 0.12'
+    target: rumble_left
+    priority: 65
+    hold: 260ms
+    value: "255"
+    modulate: { type: sine, hz: 24, depth: 0.6 }
+
+  - name: impact-coil
+    when: 'has("audio_impact") && audio_impact > 0.15'
+    target: haptic_right
+    priority: 50
+    hold: 80ms
+    value: "230"
+
+  # ---- 扳机：瞄具挡墙 ----------------------------------------------------
+  # 只用 rigid：实测这块固件上 feedback / slope_feedback 几乎无手感，
+  # 而 ACR 里用 rigid 是能明确感觉到的。分两段做"渐进 + 硬墙"。
+  - name: aim-pull
+    when: "l2 > 0.02 && l2 < 0.45"
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "95"
+
+  - name: aim-wall
+    when: "l2 >= 0.45"
+    target: l2
+    effect: rigid
+    priority: 20
+    params:
+      start: "4"
+      force: "235"

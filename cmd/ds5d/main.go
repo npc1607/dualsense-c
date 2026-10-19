@@ -154,6 +154,10 @@ func run() error {
 			CarrierHz: p.Haptics.CarrierHz,
 			Gain:      p.Haptics.Gain,
 			Command:   p.Haptics.Command,
+			Mode:      p.Haptics.Mode,
+			Source:    p.Haptics.Source,
+			LowHz:     p.Haptics.LowHz,
+			HighHz:    p.Haptics.HighHz,
 		}, logger)
 		if err != nil {
 			logger.Printf("haptics disabled: %v", err)

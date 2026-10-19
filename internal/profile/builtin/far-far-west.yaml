@@ -59,13 +59,11 @@ rules:
   - name: l2-pull
     when: "l2 > 0.02 && l2 < 0.44"
     target: l2
-    effect: slope_feedback
+    effect: rigid
     priority: 10
     params:
       start: "0"
-      end: "4"
-      start_force: "35"
-      end_force: "150"
+      force: "95"
 
   - name: l2-wall
     when: "l2 >= 0.44"
@@ -80,13 +78,11 @@ rules:
   - name: r2-pull
     when: "r2 > 0.02 && r2 < 0.67"
     target: r2
-    effect: slope_feedback
+    effect: rigid
     priority: 10
     params:
       start: "0"
-      end: "6"
-      start_force: "45"
-      end_force: "170"
+      force: "110"
 
   - name: r2-wall
     when: "r2 >= 0.67 && r2 < 0.97"

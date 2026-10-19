@@ -64,10 +64,22 @@ func New(cfg profile.Source, deps source.Deps) (source.Source, error) {
 		}
 		child, err := source.Open(profile.Source{Type: typ, Params: params}, deps)
 		if err != nil {
+			// In -dry-run there is no controller, so a device-bound part (trigger)
+			// cannot start. Dropping it keeps the rest of the profile testable
+			// without hardware; a real run still fails loudly.
+			if deps.Device == nil {
+				if deps.Logger != nil {
+					deps.Logger.Printf("combo source: parts[%d] (%s) skipped: %v", i, typ, err)
+				}
+				continue
+			}
 			return nil, fmt.Errorf("combo source: parts[%d] (%s): %w", i, typ, err)
 		}
 		s.children = append(s.children, child)
 		names = append(names, child.Name())
+	}
+	if len(s.children) == 0 {
+		return nil, errors.New("combo source: no usable parts")
 	}
 	// Keep the names for Name(); a profile with several parts shows them all.
 	s.name = "combo(" + strings.Join(names, "+") + ")"

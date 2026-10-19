@@ -119,6 +119,11 @@ func (e *Engine) installHelpers() {
 	e.env["held"] = func(name string) bool {
 		return e.cur[name] >= 0.5
 	}
+	// crossed(name, level) is the edge detector with an explicit threshold:
+	// pressed() is fixed at 0.5, which is too high for quiet game audio.
+	e.env["crossed"] = func(name string, level float64) bool {
+		return e.prev[name] < level && e.cur[name] >= level
+	}
 	e.env["has"] = func(name string) bool {
 		return e.fresh[name]
 	}

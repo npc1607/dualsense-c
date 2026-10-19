@@ -370,3 +370,41 @@ func TestBuiltinAssettoCorsaRoadFeel(t *testing.T) {
 func impactOf(g float32) map[string]float32 {
 	return map[string]float32{"speed": 80, "accel_g": g}
 }
+
+// crossed() is the edge detector with an explicit threshold, needed because
+// game audio rarely reaches pressed()'s fixed 0.5.
+func TestCrossedUsesExplicitThreshold(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "t",
+		Source: profile.Source{Type: "sim"},
+		// A 1 ms release lets the decay finish between steps, so this measures
+		// retriggering instead of the release ramp (ReleaseTime() never returns
+		// 0 -- it falls back to the default).
+		Safety: profile.Safety{Release: profile.Duration(time.Millisecond)},
+		Rules: []profile.Rule{{
+			Name:   "r",
+			When:   `crossed("loudness", 0.3)`,
+			Target: "rumble_left",
+			Value:  "200",
+		}},
+	}
+	set := signal.NewSet(nil)
+	e := mustEngine(t, p, set)
+	base := time.Now()
+
+	apply(set, base, map[string]float32{"loudness": 0.1})
+	if f := e.Step(base.Add(time.Millisecond)); f.RumbleL != 0 {
+		t.Errorf("below threshold should not fire, got %d", f.RumbleL)
+	}
+	apply(set, base.Add(10*time.Millisecond), map[string]float32{"loudness": 0.45})
+	if f := e.Step(base.Add(11 * time.Millisecond)); f.RumbleL != 200 {
+		t.Errorf("upward crossing should fire, got %d", f.RumbleL)
+	}
+	// Staying above the level must not retrigger. The first inactive frame still
+	// carries the value (that is where the release ramp starts), so step twice.
+	apply(set, base.Add(20*time.Millisecond), map[string]float32{"loudness": 0.6})
+	e.Step(base.Add(21 * time.Millisecond))
+	if f := e.Step(base.Add(30 * time.Millisecond)); f.RumbleL != 0 {
+		t.Errorf("level above threshold should not retrigger, got %d", f.RumbleL)
+	}
+}

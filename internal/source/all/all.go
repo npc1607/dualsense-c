@@ -18,4 +18,7 @@ import (
 
 	// several sources at once (e.g. trigger + audio for shooters)
 	_ "github.com/npc1607/dualsense-c/internal/source/combo"
+
+	// audio AI event detector source (local YAMNet/ONNX loopback)
+	_ "github.com/npc1607/dualsense-c/internal/source/audioai"
 )

@@ -126,3 +126,38 @@ func TestParseBand(t *testing.T) {
 		t.Errorf("reversed band not repaired: %v,%v", lo, hi)
 	}
 }
+
+// The transient detector must fire on a burst after silence and stay quiet on a
+// steady tone, even when the tone is loud (game music saturates loudness).
+func TestOnsetDetectsTransientNotLevel(t *testing.T) {
+	s := newTestSource(t)
+	const block = 256
+
+	// Steady loud tone for a while: onset should settle to ~0.
+	steady := tone(60, 0.5, s.rate, s.rate)
+	var onset float32
+	for i := 0; i+block <= len(steady); i += block {
+		s.measure(steady[i : i+block])
+		onset = s.lastOnset
+	}
+	if onset > 0.15 {
+		t.Errorf("steady tone onset = %.3f, want < 0.15 (no transient)", onset)
+	}
+
+	// Silence, then a burst: onset must spike.
+	silent := make([]float32, block*60) // ~1s: let the bed tracker settle
+	for i := 0; i < len(silent); i += block {
+		s.measure(silent[i : i+block])
+	}
+	burst := tone(60, 0.5, s.rate, block*2)
+	var peak float32
+	for i := 0; i+block <= len(burst); i += block {
+		s.measure(burst[i : i+block])
+		if s.lastOnset > peak {
+			peak = s.lastOnset
+		}
+	}
+	if peak < 0.4 {
+		t.Errorf("burst onset = %.3f, want > 0.4", peak)
+	}
+}

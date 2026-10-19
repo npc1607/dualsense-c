@@ -4,7 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w
 GOFLAGS := -trimpath -ldflags "$(LDFLAGS) -X main.version=$(VERSION)"
 
-.PHONY: all build bridge windows test vet fmt ci clean install-udev
+.PHONY: all build build-onnx bridge windows test vet fmt ci clean install-udev
 
 all: build bridge
 
@@ -13,6 +13,12 @@ build:
 	$(GO) build $(GOFLAGS) -o $(BIN)/ds5ctl ./cmd/ds5ctl
 	$(GO) build $(GOFLAGS) -o $(BIN)/ds5vpad ./cmd/ds5vpad
 	$(GO) build $(GOFLAGS) -o $(BIN)/ffclient ./tools/ffclient
+
+# Optional build with the in-process audio AI classifier (ONNX Runtime, CGO).
+# Needs onnxruntime-cpu installed (libonnxruntime.so + headers) and the model:
+#   models/yamnet.onnx, models/yamnet_class_map.csv  (~16 MB, not committed)
+build-onnx:
+	CGO_ENABLED=1 $(GO) build -tags onnx $(GOFLAGS) -o $(BIN)/ds5d-onnx ./cmd/ds5d
 
 # The shared-memory bridge is a Windows binary: it runs inside a Proton prefix.
 bridge:

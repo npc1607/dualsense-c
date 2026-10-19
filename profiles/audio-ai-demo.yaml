@@ -1,0 +1,160 @@
+# 音频 AI 事件/材质 → HD 音圈 + 马达
+#
+# 链路：
+#   tools/yamnet_bridge（YAMNet ONNX 推理，或 --mock 模拟）
+#     → UDP 127.0.0.1:9998（JSON 事件字典）
+#     → source/audio_ai → surface_* / audio_* 信号
+#     → 本 profile → 音圈（HD）+ 马达 + 扳机
+#
+# 用之前 demo 版本的问题：
+#   1. 只驱动马达，没有 haptic_left/right —— 而"材质差异"必须靠音圈才分得出来
+#   2. 只有 audio_ai 源却写了 l2 规则 —— l2 恒为 0，挡墙会永久生效
+# 所以这里改成 combo（trigger + audio_ai），并给每种材质/事件都配音圈输出。
+#
+# 模拟联调（不需要模型）：
+#   python3 tools/yamnet_bridge/yamnet_bridge.py --mock &
+#   ./bin/ds5d -profiles ./profiles -profile audio-ai-demo -rate 125 -trace
+#
+# 真模型联调：
+#   pip install onnxruntime
+#   python3 tools/yamnet_bridge/yamnet_bridge.py --model yamnet.onnx --live &
+name: audio-ai-demo
+title: 音频 AI 材质与战况 → HD 音圈触感
+description: |
+  外部轻量模型识别地面材质（水/金属/木板/碎石）与战况音效（枪声/爆炸/受击），
+  通过 UDP 送入 ds5d，分别驱动音圈（细节、材质差异）与马达（体量）。
+
+source:
+  type: combo
+  parts:
+    - type: trigger          # 扳机行程（瞄具挡墙）
+      rate_hz: 125
+    - type: audio_ai         # AI 事件
+      listen: "127.0.0.1:9998"
+
+haptics:
+  target: auto
+  carrier_hz: 55
+  gain: 0.9
+
+safety:
+  signal_ttl: 700ms
+  release: 250ms
+  status_lightbar: true
+
+rules:
+  # ======================================================================
+  # 材质 → 音圈（HD）：靠不同的调幅频率与幅度区分手感
+  #   水：低频连续细腻      金属：高频尖锐
+  #   木板：中频闷          碎石：宽频粗糙
+  # ======================================================================
+  - name: water-coil
+    when: 'has("surface_water") && surface_water > 0.35'
+    target: haptic_right
+    priority: 20
+    value: "clamp(200 * surface_water, 0, 190)"
+    modulate: { type: sine, hz: 42, depth: 0.55 }
+
+  - name: water-motor
+    when: 'has("surface_water") && surface_water > 0.35'
+    target: rumble_left
+    priority: 15
+    value: "clamp(120 * surface_water, 0, 110)"
+    modulate: { type: sine, hz: 22, depth: 0.6 }
+
+  - name: metal-coil
+    when: 'has("surface_metal") && surface_metal > 0.35'
+    target: haptic_right
+    priority: 20
+    value: "clamp(230 * surface_metal, 0, 220)"
+    modulate: { type: square, hz: 60, depth: 0.85 }
+
+  - name: wood-coil
+    when: 'has("surface_wood") && surface_wood > 0.35'
+    target: haptic_left
+    priority: 20
+    value: "clamp(210 * surface_wood, 0, 200)"
+    modulate: { type: sine, hz: 34, depth: 0.6 }
+
+  - name: gravel-coil
+    when: 'has("surface_gravel") && surface_gravel > 0.35'
+    target: haptic_left
+    priority: 20
+    value: "clamp(230 * surface_gravel, 0, 220)"
+    modulate: { type: square, hz: 48, depth: 0.8 }
+
+  - name: gravel-motor
+    when: 'has("surface_gravel") && surface_gravel > 0.35'
+    target: rumble_left
+    priority: 15
+    value: "clamp(140 * surface_gravel, 0, 130)"
+    modulate: { type: square, hz: 30, depth: 0.7 }
+
+  # ======================================================================
+  # 战况事件 → 马达 + 音圈
+  # ======================================================================
+  - name: gunshot-coil
+    when: 'has("audio_gunshot") && audio_gunshot > 0.45'
+    target: haptic_right
+    priority: 55
+    hold: 110ms
+    value: "255"
+
+  - name: gunshot-motor
+    when: 'has("audio_gunshot") && audio_gunshot > 0.45'
+    target: rumble_right
+    priority: 55
+    hold: 110ms
+    value: "235"
+    modulate: { type: square, hz: 26, depth: 0.5 }
+
+  - name: gunshot-body
+    when: 'has("audio_gunshot") && audio_gunshot > 0.45'
+    target: rumble_left
+    priority: 55
+    hold: 100ms
+    value: "215"
+
+  - name: explosion-coil
+    when: 'has("audio_explosion") && audio_explosion > 0.45'
+    target: haptic_left
+    priority: 65
+    hold: 260ms
+    value: "255"
+
+  - name: explosion-motor
+    when: 'has("audio_explosion") && audio_explosion > 0.45'
+    target: rumble_left
+    priority: 65
+    hold: 260ms
+    value: "255"
+    modulate: { type: sine, hz: 24, depth: 0.6 }
+
+  - name: impact-coil
+    when: 'has("audio_impact") && audio_impact > 0.4'
+    target: haptic_right
+    priority: 50
+    hold: 80ms
+    value: "220"
+
+  # ======================================================================
+  # 瞄准挡墙（trigger 源提供 l2）
+  # ======================================================================
+  - name: aim-wall
+    when: "l2 > 0.02 && l2 < 0.45"
+    target: l2
+    effect: feedback
+    priority: 10
+    params:
+      start: "0"
+      strength: "150"
+      force: "120"
+
+  - name: aim-hold
+    when: "l2 >= 0.45"
+    target: l2
+    effect: rigid
+    priority: 20
+    params:
+      start: "4"
+      force: "225"

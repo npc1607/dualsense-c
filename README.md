@@ -153,6 +153,9 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 | **高清音圈触感 (Voice-Coil)** | ✅ 可用（Linux 实测） | `sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM（`haptic_left/haptic_right`）。**前提**：HID 报告空闲时不得声明 `COMPATIBLE_VIBRATION/HAPTICS_SELECT`，否则执行器被锁在 HID 引擎上、音频流被忽略 |
 | **手柄内置扬声器** | ⚠️ 通路已验证，无专用 sink | Ch1/2 实测可出声；任何能写 PipeWire sink 的工具都能用，本项目未封装 |
 
+> 音频触感与力反馈镜像的实现细节、真机实测数据与踩坑记录见
+> 👉 **[docs/audio-haptics-and-ffb.md](docs/audio-haptics-and-ffb.md)**
+>
 > 完整 14 项硬件特性拆解、信号源延迟差距、Astro's Playroom 触感还原度对比及 Linux & Windows 双平台音频触感方案，详见专属技术方案：
 > 👉 **[PS5 DualSense 硬件能力、驱动边界与高清触感技术方案 (docs/hardware-capabilities.md)](docs/hardware-capabilities.md)**
 
@@ -344,6 +347,8 @@ rules:
 > 时才声明这两个位，空闲时把执行器交还给音频流。
 > 另外 `valid_flag0` 的 BIT4-7（音量/audio_control）必须保持清零，否则会静音
 > 整个 USB 音频 DAC（表现为连扬声器都没声音）。
+>
+> 👉 完整设计与踩坑记录：[docs/audio-haptics-and-ffb.md](docs/audio-haptics-and-ffb.md)
 
 DS5 同时是一块 4 声道 48kHz USB 声卡，Ch3/4 直连左右音圈。HID 震动字节只能表达
 「振幅 + 一个调幅频率」，是音圈的低分辨率近似；写 PCM 才能真正还原频谱与瞬态。
@@ -529,10 +534,14 @@ internal/
   profile/                Profile 结构体定义与内置 YAML 解析
   rules/                  表达式解析引擎、优先级控制与状态锁存衰减
   sink/                   高精度时钟驱动与退出状态重置
+    haptics/              音圈 PCM 合成与 4 声道输出
+  vpad/                   虚拟手柄后端（Linux uinput / Windows 占位）
   report/                 传输模式自适应输出报告构建
   source/                 数据源驱动接入实现
     trigger/              手柄按键与扳机行程驱动源
     udp/                  UDP 遥测驱动（Forza / OutGauge / DiRT / ACSHM / Fields）
+    audio/                音频包络源（PipeWire monitor → bass/mid/loudness）
+    ffb/                  力反馈源（虚拟手柄捕获的 rumble → ffb_left/right）
     sim/                  离线仿真数据源
 udev/70-dualsense.rules   Linux 非 root 读写权限规则
 scripts/launch-bridge.sh  Proton 前缀桥接启动脚本

@@ -38,7 +38,7 @@ source:
       ai_debug: true         # 打印 top-3 类别（标定用；稳定后可关）
       env_debug: true        # 每秒打印包络峰值（标定门槛用）
       rate_hz: 60
-      gain: 3.0             # 归一化后 gain 生效：游戏音频 rms~0.14 -> ~0.6
+      gain: 1.5             # 实测游戏内 loudness 会饱和到 1.0，降一点留出动态范围
       bass_hz: "20,110"
       mid_hz: "160,450"
 
@@ -55,35 +55,35 @@ safety:
 rules:
   # ---- 材质 → 音圈（HD）：不同调幅频率造出不同"质地" --------------------
   - name: water-coil
-    when: 'has("surface_water") && surface_water > 0.12'
+    when: 'has("surface_water") && surface_water > 0.20 && surface_water >= surface_metal && surface_water >= surface_wood && surface_water >= surface_gravel'
     target: haptic_right
     priority: 20
     value: "clamp(240 * surface_water, 0, 220)"
     modulate: { type: sine, hz: 42, depth: 0.55 }
 
   - name: metal-coil
-    when: 'has("surface_metal") && surface_metal > 0.035'
+    when: 'has("surface_metal") && surface_metal > 0.20 && surface_metal >= surface_water && surface_metal >= surface_wood && surface_metal >= surface_gravel'
     target: haptic_right
     priority: 20
     value: "clamp(255 * surface_metal, 0, 235)"
     modulate: { type: square, hz: 58, depth: 0.8 }
 
   - name: wood-coil
-    when: 'has("surface_wood") && surface_wood > 0.04'
+    when: 'has("surface_wood") && surface_wood > 0.20 && surface_wood >= surface_water && surface_wood >= surface_metal && surface_wood >= surface_gravel'
     target: haptic_left
     priority: 20
     value: "clamp(230 * surface_wood, 0, 210)"
     modulate: { type: sine, hz: 34, depth: 0.6 }
 
   - name: gravel-coil
-    when: 'has("surface_gravel") && surface_gravel > 0.12'
+    when: 'has("surface_gravel") && surface_gravel > 0.20 && surface_gravel >= surface_water && surface_gravel >= surface_metal && surface_gravel >= surface_wood'
     target: haptic_left
     priority: 20
     value: "clamp(245 * surface_gravel, 0, 225)"
     modulate: { type: square, hz: 48, depth: 0.75 }
 
   - name: gravel-motor
-    when: 'has("surface_gravel") && surface_gravel > 0.16'
+    when: 'has("surface_gravel") && surface_gravel > 0.30 && surface_gravel >= surface_water && surface_gravel >= surface_metal && surface_gravel >= surface_wood'
     target: rumble_left
     priority: 15
     value: "clamp(150 * surface_gravel, 0, 130)"
@@ -95,21 +95,25 @@ rules:
   #   确认与补强（~1s 后到位）    ← YAMNet 分类
   # YAMNet 的窗口是 1 秒，纯靠它做枪声必然延迟；包络负责"立刻有反应"。
   # ======================================================================
+  # 边沿触发：pressed() 只在 loudness 从 <0.5 跳到 >=0.5 的那一帧为真。
+  # 之前用电平判断（>0.25），背景音乐常年过线 -> 一直震（"傻震"就是这个）。
+  # 用 onset 信号（fast/slow 包络差）而不是绝对音量：游戏音乐会把 loudness
+  # 压到饱和 1.0，绝对阈值要么一直触发、要么永不触发。
   - name: onset-haptic
-    when: 'has("loudness") && loudness > 0.25'
+    when: 'has("onset") && onset > 0.25'
     target: haptic_right
     priority: 30
-    hold: 60ms
-    value: "clamp(1200 * (loudness - 0.25), 0, 245)"
+    hold: 90ms
+    value: "clamp(600 * onset + 90, 90, 245)"
 
   # 实测：枪声能量在 loudness（宽带瞬态），bass 只有 0.016；
   # 所以瞬态两路都用 loudness，bass 只留给爆炸的低频体感。
   - name: onset-motor
-    when: 'has("loudness") && loudness > 0.28'
+    when: 'has("onset") && onset > 0.25'
     target: rumble_right
     priority: 30
-    hold: 60ms
-    value: "clamp(200 + 800 * (loudness - 0.28), 0, 255)"
+    hold: 90ms
+    value: "clamp(500 * onset + 120, 140, 255)"
     modulate: { type: square, hz: 28, depth: 0.5 }
 
   # ---- 战况事件（AI 确认后加强）-----------------------------------------

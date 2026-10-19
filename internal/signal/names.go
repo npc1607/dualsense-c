@@ -38,6 +38,10 @@ var Standard = []string{
 	// Force feedback captured from a virtual pad (source/ffb): 0..1 per motor.
 	"ffb_left", "ffb_right",
 
+	// Transient detector (source/audio): 0..1, spikes on onsets (gunshots,
+	// impacts) regardless of how loud the background bed is.
+	"onset",
+
 	// Audio AI event detector signals (ambient surface & sound events)
 	"surface_water", "surface_metal", "surface_wood", "surface_gravel",
 	"audio_gunshot", "audio_explosion", "audio_impact",

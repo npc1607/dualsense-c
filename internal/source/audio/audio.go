@@ -85,8 +85,16 @@ type Source struct {
 	lastBass float32
 	lastMid  float32
 	lastLoud float32
-	prevLoud float32
-	envLast  time.Time
+
+	// Transient detector state: a fast and a slow tracker of block RMS. The
+	// difference spikes on onsets even when the background bed is loud, which
+	// an absolute threshold cannot do (game music saturates `loudness`).
+	onsetFast    float64
+	onsetSlow    float64
+	lastOnset    float32
+	envPeakOnset float32
+	prevLoud     float32
+	envLast      time.Time
 }
 
 // New builds the source from the profile's `source:` block.
@@ -441,6 +449,7 @@ func (s *Source) consume(ctx context.Context, r io.Reader, out chan<- signal.Fra
 			"bass":     s.lastBass,
 			"mid":      s.lastMid,
 			"loudness": s.lastLoud,
+			"onset":    s.lastOnset,
 		}
 		if s.envDebug {
 			if s.prevLoud < 0.08 && vals["loudness"] >= 0.08 {
@@ -456,14 +465,18 @@ func (s *Source) consume(ctx context.Context, r io.Reader, out chan<- signal.Fra
 			if vals["loudness"] > s.envPeak[2] {
 				s.envPeak[2] = vals["loudness"]
 			}
+			if vals["onset"] > s.envPeakOnset {
+				s.envPeakOnset = vals["onset"]
+			}
 			if s.envLast.IsZero() {
 				s.envLast = now
 			} else if now.Sub(s.envLast) >= time.Second {
-				s.log.Printf("audio: env peak raw=%.3f rms=%.4f bass=%.3f mid=%.3f loudness=%.3f",
-					s.rawPeak, s.rmsPeak, s.envPeak[0], s.envPeak[1], s.envPeak[2])
+				s.log.Printf("audio: env peak raw=%.3f rms=%.4f bass=%.3f mid=%.3f loudness=%.3f onset=%.3f",
+					s.rawPeak, s.rmsPeak, s.envPeak[0], s.envPeak[1], s.envPeak[2], s.envPeakOnset)
 				s.rawPeak = 0
 				s.rmsPeak = 0
 				s.envPeak = [3]float32{}
+				s.envPeakOnset = 0
 				s.envLast = now
 			}
 		}
@@ -557,6 +570,18 @@ func (s *Source) measure(samples []float32) (bass, mid, loud float64) {
 	// effect on the signals at all, which kept game audio stuck near the
 	// thresholds no matter how the profile was tuned.
 	s.lastBass, s.lastMid, s.lastLoud = float32(bass), float32(mid), float32(loud)
+
+	// Onset = how far the fast tracker is above the slow one, relative to the
+	// slow level so a loud bed does not mask it.
+	rmsNow := math.Sqrt(allSum / n)
+	if rmsNow > s.onsetFast {
+		s.onsetFast += 0.6 * (rmsNow - s.onsetFast) // jump up quickly
+	} else {
+		s.onsetFast += 0.15 * (rmsNow - s.onsetFast)
+	}
+	s.onsetSlow += 0.05 * (rmsNow - s.onsetSlow) // ~300ms bed tracker
+	jump := s.onsetFast - s.onsetSlow
+	s.lastOnset = float32(clamp01(jump / (s.onsetSlow + 0.002)))
 	return bass, mid, loud
 }
 

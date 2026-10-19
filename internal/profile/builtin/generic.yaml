@@ -58,6 +58,16 @@ rules:
       start: "1"
       end: "9"
 
+  # 电量低于 15% 时把灯条压成红色（需要手柄输入源提供 battery）
+  - name: low-battery
+    when: 'has("battery") && battery > 0 && battery < 0.15'
+    target: lightbar
+    priority: 30
+    params:
+      r: "255"
+      g: "0"
+      b: "0"
+
   - name: lightbar
     target: lightbar
     priority: 1

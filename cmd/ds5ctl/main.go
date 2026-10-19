@@ -307,6 +307,10 @@ func cmdWatch(args []string) error {
 		last = time.Now()
 		fmt.Printf("L2=%.2f R2=%.2f LX=%+.2f LY=%+.2f RX=%+.2f RY=%+.2f L1=%v R1=%v cross=%v seq=%d\n",
 			st.L2, st.R2, st.LX, st.LY, st.RX, st.RY, st.L1, st.R1, st.Cross, st.Sequence)
+		fmt.Printf("  gyro=%+.2f/%+.2f/%+.2f accel=%+.2f/%+.2f/%+.2f touch=%v id=%d (%.2f,%.2f) battery=%.1f%% raw=%#02x charging=%v\n",
+			st.GyroX, st.GyroY, st.GyroZ, st.AccelX, st.AccelY, st.AccelZ,
+			st.TouchActive, st.TouchID, st.TouchX, st.TouchY,
+			st.Battery*100, st.BatteryRaw, st.Charging)
 	}
 }
 

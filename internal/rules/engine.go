@@ -26,6 +26,7 @@ const (
 	targetRumbleRight target = "rumble_right"
 	targetLightbar    target = "lightbar"
 	targetPlayerLEDs  target = "player_leds"
+	targetMuteLED     target = "mute_led"
 )
 
 type rule struct {
@@ -185,7 +186,7 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 			}
 			r.params[idx] = prog
 		}
-	case targetRumbleLeft, targetRumbleRight, targetPlayerLEDs:
+	case targetRumbleLeft, targetRumbleRight, targetPlayerLEDs, targetMuteLED:
 		prog, err := e.compile(pr.Value)
 		if err != nil {
 			return fail(fmt.Errorf("value: %w", err))
@@ -319,6 +320,13 @@ func (e *Engine) apply(r *rule, f *hid.Frame, written map[target]bool) {
 			return
 		}
 		f.PlayerLEDs = clamp8(v)
+	case targetMuteLED:
+		v, err := e.eval(r.value)
+		if err != nil {
+			e.reportErr(r, err)
+			return
+		}
+		f.MuteLED = v >= 0.5
 	}
 	delete(e.releaseAt, r.target)
 	written[r.target] = true

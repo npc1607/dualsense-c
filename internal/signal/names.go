@@ -6,6 +6,10 @@ package signal
 // a source only has to fill in the ones it can actually provide. Missing
 // signals stay at 0 and report has() == 0, so a rule can decide to skip
 // instead of silently driving the trigger to zero.
+//
+// APPEND ONLY: the bridge wire format sends ids (indices into this slice), so
+// inserting a name in the middle silently breaks compatibility with an already
+// deployed ds5bridge.exe. New names go at the very end of the slice.
 var Standard = []string{
 	// Vehicle telemetry (racing games, sims, ...)
 	"throttle", "brake", "clutch", "steer", "speed", "rpm", "gear",
@@ -21,6 +25,12 @@ var Standard = []string{
 
 	// Generic escape hatches for profile-specific sources
 	"custom0", "custom1", "custom2", "custom3",
+
+	// Controller sensors (appended, see the note above)
+	"gyro_x", "gyro_y", "gyro_z", // full-scale normalised -1..1
+	"accel_x", "accel_y", "accel_z",
+	"touch_x", "touch_y", "touch_active", // touchpad contact, 0..1
+	"battery", "charging", // battery 0..1 (10% steps)
 }
 
 var standard = func() map[string]struct{} {

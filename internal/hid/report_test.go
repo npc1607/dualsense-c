@@ -103,3 +103,18 @@ func TestParamIndex(t *testing.T) {
 		t.Error("rigid.amplitude should be rejected")
 	}
 }
+
+func TestPlayerLEDControlFlag(t *testing.T) {
+	// Default frames must not touch the player indication.
+	if got := BuildUSB(Idle())[39]; got != 0x03 {
+		t.Errorf("idle valid_flag2 = %#x, want 0x03", got)
+	}
+	// Asking for a pattern enables player-LED control as well.
+	f := Frame{PlayerLEDs: 0x04, RumbleL: 10}
+	if got := BuildUSB(f)[39]; got != 0x03|0x04 {
+		t.Errorf("valid_flag2 with player LEDs = %#x, want 0x07", got)
+	}
+	if got := BuildUSB(f)[44]; got != 0x04 {
+		t.Errorf("player leds = %#x", got)
+	}
+}

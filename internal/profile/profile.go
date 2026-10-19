@@ -93,7 +93,7 @@ type Safety struct {
 
 // Rule is one declarative mapping from signals to an effect.
 //
-//	target: l2 | r2 | rumble_left | rumble_right | lightbar | player_leds
+//	target: l2 | r2 | rumble_left | rumble_right | lightbar | player_leds | mute_led
 //	effect: off | rigid | section | feedback | weapon | vibration |
 //	        slope_feedback | slope_weapon | machine      (triggers only)
 //	when:   optional expression, the rule only applies while it is true
@@ -189,7 +189,7 @@ func (p *Profile) Validate() error {
 			if r.Effect == "" {
 				return fmt.Errorf("profile %s: %s: effect is required for target %s", p.Name, label, r.Target)
 			}
-		case "rumble_left", "rumble_right", "player_leds":
+		case "rumble_left", "rumble_right", "player_leds", "mute_led":
 			if r.Value == "" {
 				return fmt.Errorf("profile %s: %s: value is required for target %s", p.Name, label, r.Target)
 			}

@@ -213,3 +213,51 @@ func TestLightbarRule(t *testing.T) {
 		t.Errorf("lightbar = %v", f.Lightbar)
 	}
 }
+
+func TestMuteLEDTarget(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "t",
+		Source: profile.Source{Type: "sim"},
+		Rules: []profile.Rule{{
+			When:   `held("mute")`,
+			Target: "mute_led",
+			Value:  "1",
+		}},
+	}
+	set := signal.NewSet(nil)
+	e := mustEngine(t, p, set)
+	base := time.Now()
+
+	apply(set, base, map[string]float32{"mute": 1})
+	if f := e.Step(base.Add(time.Millisecond)); !f.MuteLED {
+		t.Error("mute LED should be on while the mute button is held")
+	}
+	apply(set, base.Add(10*time.Millisecond), map[string]float32{"mute": 0})
+	if f := e.Step(base.Add(11 * time.Millisecond)); f.MuteLED {
+		t.Error("mute LED should be off after release")
+	}
+}
+
+func TestSensorSignalsReachRules(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "t",
+		Source: profile.Source{Type: "trigger"},
+		Rules: []profile.Rule{{
+			When:   "battery > 0 && battery < 0.2",
+			Target: "lightbar",
+			Params: map[string]string{"r": "255", "g": "0", "b": "0"},
+		}},
+	}
+	set := signal.NewSet(nil)
+	e := mustEngine(t, p, set)
+	base := time.Now()
+
+	apply(set, base, map[string]float32{"battery": 0.1})
+	if f := e.Step(base.Add(time.Millisecond)); f.Lightbar != [3]uint8{255, 0, 0} {
+		t.Errorf("low battery lightbar = %v", f.Lightbar)
+	}
+	apply(set, base.Add(10*time.Millisecond), map[string]float32{"battery": 0.8})
+	if f := e.Step(base.Add(11 * time.Millisecond)); f.Lightbar != [3]uint8{} {
+		t.Errorf("battery fine: lightbar = %v, want untouched", f.Lightbar)
+	}
+}

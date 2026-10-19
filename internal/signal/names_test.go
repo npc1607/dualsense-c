@@ -28,13 +28,19 @@ func TestIDsAreStableAndUnique(t *testing.T) {
 	}
 }
 
-// The bridge wire format depends on ids matching the vocabulary order; pin a
-// few so an accidental reorder is caught immediately.
+// The bridge wire format depends on ids matching the vocabulary order, and a
+// deployed ds5bridge.exe keeps sending the ids it was built with. Pin a few so
+// an accidental reorder (or an insert in the middle) is caught immediately.
 func TestIDPinned(t *testing.T) {
-	if id, _ := ID("throttle"); id != 0 {
-		t.Errorf("throttle id = %d, want 0", id)
+	pinned := map[string]uint8{
+		"throttle": 0,
+		"brake":    1,
+		"slip":     7,
+		"custom0":  42,
 	}
-	if id, _ := ID("brake"); id != 1 {
-		t.Errorf("brake id = %d, want 1", id)
+	for name, want := range pinned {
+		if id, ok := ID(name); !ok || id != want {
+			t.Errorf("%s id = %d (ok=%v), want %d -- append new names, never insert", name, id, ok, want)
+		}
 	}
 }

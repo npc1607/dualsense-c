@@ -1,6 +1,7 @@
 package input
 
 import (
+	"encoding/binary"
 	"math"
 	"testing"
 )
@@ -82,5 +83,83 @@ func TestSignalsExposeFullPress(t *testing.T) {
 	sig := s.Signals()
 	if sig["l2_full"] != 1 || sig["r2_full"] != 0 {
 		t.Errorf("full press flags = %v/%v", sig["l2_full"], sig["r2_full"])
+	}
+}
+
+func TestParseSensors(t *testing.T) {
+	b := make([]byte, 64)
+	b[0] = 0x01
+	p := b[1:]                                      // payload-relative offsets below
+	p[0], p[1], p[2], p[3] = 0x80, 0x80, 0x80, 0x80 // sticks centred
+	p[6] = 1                                        // sequence
+
+	// gyro (payload 15) and accel (payload 21), int16 LE
+	binary.LittleEndian.PutUint16(p[15:], uint16(1024))
+	binary.LittleEndian.PutUint16(p[17:], uint16(0xF800)) // -2048
+	binary.LittleEndian.PutUint16(p[23:], uint16(16384))
+
+	// touch contact 1 at payload 32: active, id=3, x=960, y=540
+	p[32] = 0x80 | 3
+	p[33] = 960 & 0xff
+	p[34] = byte((540&0x0f)<<4) | byte(960>>8)
+	p[35] = byte(540 >> 4)
+
+	// battery at payload 52: level 5, status nibble 1 (charging)
+	p[52] = 0x15
+
+	s, ok := Parse(b)
+	if !ok {
+		t.Fatal("Parse rejected the report")
+	}
+	if got := s.GyroX; got != 1024.0/32768 {
+		t.Errorf("GyroX = %v", got)
+	}
+	if got := s.GyroY; got != -2048.0/32768 {
+		t.Errorf("GyroY = %v", got)
+	}
+	if got := s.AccelY; got != 0.5 {
+		t.Errorf("AccelY = %v, want 0.5", got)
+	}
+	if !s.TouchActive || s.TouchID != 3 {
+		t.Errorf("touch active=%v id=%d", s.TouchActive, s.TouchID)
+	}
+	if math.Abs(float64(s.TouchX)-960.0/1919) > 1e-6 {
+		t.Errorf("TouchX = %v", s.TouchX)
+	}
+	if math.Abs(float64(s.TouchY)-540.0/1079) > 1e-6 {
+		t.Errorf("TouchY = %v", s.TouchY)
+	}
+	if s.Battery != 0.5 {
+		t.Errorf("Battery = %v, want 0.5", s.Battery)
+	}
+	if !s.Charging {
+		t.Error("Charging should be true for status nibble 1")
+	}
+
+	sig := s.Signals()
+	for _, name := range []string{"gyro_x", "accel_y", "touch_x", "touch_y", "touch_active", "battery", "charging"} {
+		if _, ok := sig[name]; !ok {
+			t.Errorf("Signals() is missing %q", name)
+		}
+	}
+}
+
+func TestParseIgnoresInactiveTouch(t *testing.T) {
+	b := make([]byte, 64)
+	b[0] = 0x01
+	p := b[1:]
+	p[0], p[1], p[2], p[3] = 0x80, 0x80, 0x80, 0x80 // sticks centred
+	p[6] = 1                                        // sequence
+	p[32] = 0x03                                    // bit7 clear = no contact
+
+	s, ok := Parse(b)
+	if !ok {
+		t.Fatal("Parse rejected the report")
+	}
+	if s.TouchActive {
+		t.Error("touch should be inactive when bit7 is clear")
+	}
+	if s.TouchX != 0 || s.TouchY != 0 {
+		t.Errorf("stale touch coords: %v,%v", s.TouchX, s.TouchY)
 	}
 }

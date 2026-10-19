@@ -3,6 +3,19 @@
 按 tag 分节。release 流水线会自动抽取对应小节（`## <tag>`）作为发布说明，
 所以**新版本发布前必须在这里加一节**，否则发布正文会退化成一句 compare 链接。
 
+## v0.1.3 - 2026-10-19
+
+### 新增
+- 输入解析补齐手柄传感器：陀螺仪 `gyro_x/y/z`、加速度 `accel_x/y/z`、触控板坐标
+  `touch_x/touch_y/touch_active`、电量 `battery/charging`（`ds5ctl watch` 同时打印原始字节便于校准）
+- 规则新增 `mute_led` target（静音键指示灯）
+
+### 修复
+- `player_leds` 之前可能不生效：`valid_flag2` 现在只在值非 0 时打开 player-LED 控制位
+  （0 仍表示"不动它"，避免把默认的玩家指示关掉）
+
+> 传感器偏移按社区文档实现，未逐固件验证；用 `ds5ctl watch` 先确认再写规则。
+
 ## v0.1.2 - 2026-10-19
 
 ### 新增

@@ -58,7 +58,14 @@ func BuildUSB(f Frame) []byte {
 	}
 	writeTrigger(b[offR2Block:offR2Block+11], f.R2)
 	writeTrigger(b[offL2Block:offL2Block+11], f.L2)
-	b[offValid2] = 0x03 // lightbar + player LED control
+	// valid_flag2: lightbar control is always on; player-LED control is only
+	// enabled when the caller actually wants a pattern, because enabling it with
+	// a zero value would switch the default player indication off.
+	flags2 := byte(0x03)
+	if f.PlayerLEDs != 0 {
+		flags2 |= 0x04
+	}
+	b[offValid2] = flags2
 	b[offBright] = 0x02
 	b[offPlayerLED] = f.PlayerLEDs
 	b[offLightbar] = f.Lightbar[0]

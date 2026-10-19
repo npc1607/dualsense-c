@@ -5,6 +5,7 @@
 架构采用「信号源（Source）→ 归一化信号（Signal）→ 规则引擎（Rules）→ 硬件输出（Sink）」四层解耦设计，硬件驱动与游戏逻辑完全分离。适配新游戏仅需编写声明式 YAML Profile，无需修改或重新编译程序。
 
 - **全游戏通用（输入驱动）**：不依赖游戏支持，读取控制器自带的 L2/R2 扳机行程与按键，实现瞄准挡墙与射击后坐力反馈。
+- **全传感器与手柄状态接入**：内置解析 6 轴运动传感器（陀螺仪角速度 / 加速度计）、触控板坐标、电池电量与充电状态，支持独立控制静音键 LED 与 5 颗玩家指示灯。
 - **原生遥测支持**：内置支持 Forza Horizon 4/5（UDP 5300）、BeamNG / Live for Speed（OutGauge 4444），并提供 DiRT Rally / EA WRC / F1 系列的字段级动态校准能力。
 - **Proton / Wine 共享内存桥接**：针对 Assetto Corsa / ACC / AC Rally 等依赖 Windows 命名共享内存（`acpmf_physics`）的游戏，提供轻量 Windows 桥接程序 `ds5bridge.exe`，在 Proton 前缀内读取数据并回传至原生守护进程。
 - **纯 Go 实现、零 CGO 依赖**：Linux 环境原生读写 `/dev/hidraw`，Windows 环境直接调用 HID API。
@@ -282,7 +283,7 @@ signals: [custom_boost]      # 可选：声明自定义扩展信号名
 rules:
   - name: l2-brake
     when: 'has("brake") && brake > 0.01'     # 激活条件，未定义则始终匹配
-    target: l2                               # 输出目标：l2 | r2 | rumble_left | rumble_right | lightbar | player_leds
+    target: l2                               # 输出目标：l2 | r2 | rumble_left | rumble_right | lightbar | player_leds | mute_led
     effect: rigid                            # 扳机模式（见效果表）
     priority: 10                             # 执行优先级，数值大者优先覆盖
     hold: 0ms                                # 脉冲类信号触发后的最短保持时长
@@ -365,7 +366,8 @@ modulate: { type: square, hz: 30, depth: 1.0 }  # 方波调幅（适用于机械
 | 类别 | 信号名称与取值规范 |
 |---|---|
 | **车辆遥测** | `throttle`, `brake`, `clutch`, `slip`, `lockup`, `abs`, `tc`, `rumble`：归一化至 `[0, 1]`<br>`steer`：方向盘转角，取值范围 `[-1, 1]`<br>`speed`：时速（km/h）<br>`rpm`：转速，按红线转速归一化至 `[0, 1]`<br>`gear`：档位数值<br>`accel_g`, `lat_g`：加速度 G 值<br>`surface`：路面材质标识 |
-| **手柄输入** | `l2`, `r2`：模拟量行程，取值范围 `[0, 1]`<br>`l2_full`, `r2_full`：行程触底开关（bool）<br>`l1`, `r1`, `cross`, `circle`, `square`, `triangle`, `up`, `down`, `left`, `right`, `ps`, `touchpad`, `mute`：按键状态（bool）<br>`lx`, `ly`, `rx`, `ry`：摇杆坐标，取值范围 `[-1, 1]`<br>`stick_l`, `stick_r`：摇杆下压开关（bool） |
+| **手柄按键与摇杆** | `l2`, `r2`：模拟量行程，取值范围 `[0, 1]`<br>`l2_full`, `r2_full`：行程触底开关（bool）<br>`l1`, `r1`, `cross`, `circle`, `square`, `triangle`, `up`, `down`, `left`, `right`, `ps`, `touchpad`, `mute`：按键状态（bool）<br>`lx`, `ly`, `rx`, `ry`：摇杆坐标，取值范围 `[-1, 1]`<br>`stick_l`, `stick_r`：摇杆下压开关（bool） |
+| **手柄传感器与状态** | `gyro_x`, `gyro_y`, `gyro_z`：6 轴角速度（小端 int16 归一化至 `[-1, 1]`）<br>`accel_x`, `accel_y`, `accel_z`：6 轴线性加速度（小端 int16 归一化至 `[-1, 1]`）<br>`touch_x`, `touch_y`：触控板首个触点归一化坐标 `[0, 1]`（基于 1920×1080 分辨率）<br>`touch_active`：触控板是否处于触摸接触状态（bool）<br>`battery`：电池电量等级（`0.0 ~ 1.0`，以 10% 步长递增）<br>`charging`：电池充电中标志（bool） |
 | **自定义扩展** | `custom0` ~ `custom3`：供特殊遥测项绑定的用户自定义通道 |
 
 各解码器的具体映射实现可参阅 `internal/source/udp/decoders.go`。
@@ -481,10 +483,12 @@ profiles/                 用户自定义 Profile 目录
 ## 开发计划
 
 - [x] **Assetto Corsa / ACC / AC Rally**：提供 `ds5bridge` Proton 桥接支持与 `acshm` 解码器
+- [x] **全手柄传感器与状态接入**：陀螺仪与加速度计（6 轴）、触控板坐标、电量/充电状态，以及静音灯与玩家指示灯控制
 - [ ] **rFactor 2 / LMU、ETS2 / ATS**：基于桥接架构扩展共享内存布局解析
 - [ ] **iRacing 支持**：接入 iRacing 内存映射 SDK
-- [ ] **力反馈镜像驱动（`source/ffb`）**：通过 uinput 虚拟设备捕获标准力反馈，适配无遥测的射击与动作游戏
+- [ ] **力反馈镜像驱动（`source/ffb`）**：通过 uinput 虚拟设备捕获标准力反馈，让无遥测的射击与动作游戏实现受击/后坐力驱动
 - [ ] **音频包络驱动（`source/audio`）**：基于 PipeWire 捕获系统低频音频生成自适应触感
+- [ ] **触控板多指手势识别**：支持双指滑动、捏合映射为虚拟轮盘/旋钮
 - [ ] **焦点窗口仲裁**：依据前台活跃窗口自动平滑切换 Profile
 - [ ] **遥测录制与回放（`ds5d replay`）**：支持测试数据录制，用于回归调试
 

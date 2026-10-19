@@ -117,10 +117,25 @@ make install-udev
 
 **共享内存竞速游戏（AC / ACC / AC Rally）**
 
+推荐用一键脚本（自动管进程、日志与崩溃的桥）：
+
+```bash
+./scripts/ds5-acr.sh start      # ds5d + 桥一起起（AppID 默认 3917090 = AC Rally）
+./scripts/ds5-acr.sh status     # 看进程、signals、桥是否卡住
+./scripts/ds5-acr.sh stop       # 全部停掉，手柄交还 Steam
+./scripts/ds5-acr.sh bridge-restart   # 桥卡死时只重启桥（游戏重启后常见）
+./scripts/ds5-acr.sh logs       # 同时 tail 两个日志
+
+# 可用环境变量覆盖：DS5_APPID / DS5_PROFILE / DS5_RATE
+DS5_APPID=805550 DS5_RATE=250 ./scripts/ds5-acr.sh start
+```
+
+手动等价命令：
+
 ```bash
 make bridge                                   # 编译 Windows 桥接程序 bin/ds5bridge.exe
-./bin/ds5d -profile assetto-corsa &           # 启动后台守护进程
-./scripts/launch-bridge.sh 805550             # 在指定 Steam AppID 的 Proton 前缀中启动桥接程序
+./bin/ds5d -profile assetto-corsa -rate 125 &  # 启动后台守护进程
+./scripts/launch-bridge.sh 3917090             # 在 Proton 前缀中启动桥接程序
 # Steam AppID 对照：AC: 244210 | ACC: 805550 | AC Rally: 3917090
 ```
 
@@ -545,6 +560,7 @@ internal/
     sim/                  离线仿真数据源
 udev/70-dualsense.rules   Linux 非 root 读写权限规则
 scripts/launch-bridge.sh  Proton 前缀桥接启动脚本
+scripts/ds5-acr.sh        ACR/AC/ACC 一键启停（start/stop/status/logs）
 tools/bridgesim/          共享内存桥接数据流本地仿真器
 profiles/                 用户自定义 Profile 目录
 ```

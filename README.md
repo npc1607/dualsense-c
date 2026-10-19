@@ -481,8 +481,11 @@ profiles/                 放你自己的 profile（用 -profiles 指定）
 推 tag 触发流水线（`verify` → `build` 矩阵 → `release`）：
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.1.3 && git push origin v0.1.3
 ```
+
+发布正文由 `.github/scripts/release-notes.sh` 生成：**`CHANGELOG.md` 里对应 tag 的小节**
++ 包内文件说明 + 快速开始 + compare 链接。所以发版前先写 CHANGELOG（标题就用 `## v0.1.3`）。
 
 下载 `ds5c-<os>-<arch>.tar.gz`（Windows 为 `.zip`）后，包内每个文件的作用：
 

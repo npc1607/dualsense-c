@@ -117,6 +117,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # Full history: the notes script needs the previous tag for the compare link.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -128,6 +133,10 @@ jobs:
           cd dist
           cat ./*.sha256 > SHA256SUMS
           cat SHA256SUMS
+
+      # Body = CHANGELOG section for the tag + what is in the archive + quick start.
+      - name: release notes
+        run: bash .github/scripts/release-notes.sh "$VERSION" > "$RUNNER_TEMP/notes.md"
 
       - name: publish
         env:
@@ -144,13 +153,16 @@ jobs:
             echo "no artifacts found"; exit 1
           fi
 
+          title="dualsense-c ${TAG}"
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            echo "release $TAG exists, uploading assets (clobber)"
+            echo "release $TAG exists: updating title/notes and assets"
+            gh release edit "$TAG" --repo "$REPO" \
+              --title "$title" --notes-file "$RUNNER_TEMP/notes.md"
             gh release upload "$TAG" --repo "$REPO" --clobber "${files[@]}"
           else
             gh release create "$TAG" --repo "$REPO" \
               --target "$GITHUB_SHA" \
-              --title "$TAG" \
-              --generate-notes \
+              --title "$title" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
               "${files[@]}"
           fi

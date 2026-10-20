@@ -161,26 +161,26 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 
 | 硬件能力分类 | 支持度 | 驱动通道与技术实现 |
 |---|---|---|
-| **自适应阻力扳机 (L2/R2)** | ✅ 100% | HID 报告（11 字节协议），语义封装 8 种模式 + 裸参数 `p0..p9` |
-| **传统马达震动 (L/R)** | ✅ 100% | HID 报告（0~255 幅度），支持正弦波与方波动态调幅 |
-| **全部按键 / 摇杆 / 扳机行程** | ✅ 100% | HID 输入报告解析，支持高敏度连续量与边沿检测 |
-| **6 轴运动传感器 (IMU)** | ✅ 100% | 陀螺仪角速度 (`gyro_x/y/z`) + 线性加速度 (`accel_x/y/z`) 归一化 |
-| **触控板坐标 / 电池与充电状态** | ✅ 100% | 1920×1080 触控坐标 (`touch_x/y`)、电量 (`battery`) 与充电标志 (`charging`) |
-| **指示灯全系控制** | ✅ 100% | RGB 状态灯条 (`lightbar`)、静音键指示灯 (`mute_led`)、5 颗玩家指示灯 (`player_leds`) |
-| **高清音圈触感 (Voice-Coil)** | ✅ 可用（Linux 实测） | `sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM（`haptic_left/haptic_right`）。**前提**：HID 报告空闲时不得声明 `COMPATIBLE_VIBRATION/HAPTICS_SELECT`，否则执行器被锁在 HID 引擎上、音频流被忽略 |
-| **手柄内置扬声器** | ⚠️ 通路已验证，无专用 sink | Ch1/2 实测可出声；任何能写 PipeWire sink 的工具都能用，本项目未封装 |
+| **自适应阻力扳机 (L2/R2)** | [支持] 100% | HID 报告（11 字节协议），语义封装 8 种模式 + 裸参数 `p0..p9` |
+| **传统马达震动 (L/R)** | [支持] 100% | HID 报告（0~255 幅度），支持正弦波与方波动态调幅 |
+| **全部按键 / 摇杆 / 扳机行程** | [支持] 100% | HID 输入报告解析，支持高敏度连续量与边沿检测 |
+| **6 轴运动传感器 (IMU)** | [支持] 100% | 陀螺仪角速度 (`gyro_x/y/z`) + 线性加速度 (`accel_x/y/z`) 归一化 |
+| **触控板坐标 / 电池与充电状态** | [支持] 100% | 1920×1080 触控坐标 (`touch_x/y`)、电量 (`battery`) 与充电标志 (`charging`) |
+| **指示灯全系控制** | [支持] 100% | RGB 状态灯条 (`lightbar`)、静音键指示灯 (`mute_led`)、5 颗玩家指示灯 (`player_leds`) |
+| **高清音圈触感 (Voice-Coil)** | [支持] 可用（Linux 实测） | `sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM（`haptic_left/haptic_right`）。**前提**：HID 报告空闲时不得声明 `COMPATIBLE_VIBRATION/HAPTICS_SELECT`，否则执行器被锁在 HID 引擎上、音频流被忽略 |
+| **手柄内置扬声器** | [需验证] 通路已验证，无专用 sink | Ch1/2 实测可出声；任何能写 PipeWire sink 的工具都能用，本项目未封装 |
 
-> 📖 **Wiki**：分主题的教程与排错手册 —— <https://github.com/npc1607/dualsense-c/wiki>
+> **Wiki**：分主题的教程与排错手册 —— <https://github.com/npc1607/dualsense-c/wiki>
 > （源文件在 `wiki/`，`./scripts/publish-wiki.sh` 一键发布）
 >
 > 音频 AI 的接入方式、推理流程、HD 触感触发路径与调优见
-> 👉 **[音频 AI 接入与 HD 触感（含流程图）](docs/audio-ai-haptics.md)**
+>  **[音频 AI 接入与 HD 触感（含流程图）](docs/audio-ai-haptics.md)**
 >
 > 音频触感与力反馈镜像的实现细节、真机实测数据与踩坑记录见
-> 👉 **[音频触感与力反馈镜像：设计与踩坑记录](docs/audio-haptics-and-ffb.md)**
+>  **[音频触感与力反馈镜像：设计与踩坑记录](docs/audio-haptics-and-ffb.md)**
 >
 > 完整 14 项硬件特性拆解、信号源延迟差距、Astro's Playroom 触感还原度对比及 Linux & Windows 双平台音频触感方案，详见专属技术方案：
-> 👉 **[PS5 DualSense 硬件能力、驱动边界与高清触感技术方案 (docs/hardware-capabilities.md)](docs/hardware-capabilities.md)**
+>  **[PS5 DualSense 硬件能力、驱动边界与高清触感技术方案 (docs/hardware-capabilities.md)](docs/hardware-capabilities.md)**
 
 ---
 
@@ -192,8 +192,8 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 
 | 数据源类型 | 工作机制 | 支持状态 |
 |---|---|---|
-| `trigger` 源 | 解析控制器自身的输入报告（L2/R2 行程、按键状态、摇杆偏移），通过规则引擎生成阻力、挡墙与震动反馈 | ✅ 生产可用 |
-| `audio_ai` 源 | 监听本地伴生探测器（YAMNet ONNX 实时分析系统声卡混音），输出水洼/铁板/枪声等事件信号 | 🧪 实验性可用（详见 [方案文档](docs/audio-ai-event-detection.md)） |
+| `trigger` 源 | 解析控制器自身的输入报告（L2/R2 行程、按键状态、摇杆偏移），通过规则引擎生成阻力、挡墙与震动反馈 | [支持] 生产就绪 |
+| `audio_ai` 源 | 监听本地伴生探测器（YAMNet ONNX 实时分析系统声卡混音），输出水洼/铁板/枪声等事件信号 |  实验性可用（详见 [方案文档](docs/audio-ai-event-detection.md)） |
 
 适用于 FPS、TPS 及各类动作游戏。不受游戏本身是否支持 DualSense 限制（需注意避免与 Steam Input 的震动控制产生抢占冲突）。
 
@@ -201,14 +201,14 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 
 | 游戏名称 | 默认端口与格式 | 解码器 | 支持状态 |
 |---|---|---|---|
-| Forza Horizon 4 / 5、Forza Motorsport 7 / 2023 | UDP **5300**（Data Out 模式，数据格式需设置为 **Dash**） | `forza` | ✅ 内置支持 |
-| BeamNG.drive | UDP **4444**（选项 → 其他 → 启用 OutGauge） | `outgauge` | ✅ 内置支持 |
-| Live for Speed | UDP **4444**（选项 → 外设 → OutGauge） | `outgauge` | ✅ 内置支持 |
-| DiRT Rally 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（配置 → 启用 UDP 遥测） | `dirt` + `fields` | ⚠️ 提供模板（各版本结构差异较大，需使用 `sniff` 校准） |
-| F1 22 / 23 / 24 | UDP **20777** | `fields` | ⚠️ 提供模板（按年份版本校准字段偏移） |
-| Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | ✅ 内置支持（采用实测偏移定义） |
-| rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | 🚧 规划中 |
-| iRacing | 内存映射 SDK | — | 🚧 规划中 |
+| Forza Horizon 4 / 5、Forza Motorsport 7 / 2023 | UDP **5300**（Data Out 模式，数据格式需设置为 **Dash**） | `forza` | [支持] 内置 |
+| BeamNG.drive | UDP **4444**（选项 → 其他 → 启用 OutGauge） | `outgauge` | [支持] 内置 |
+| Live for Speed | UDP **4444**（选项 → 外设 → OutGauge） | `outgauge` | [支持] 内置 |
+| DiRT Rally 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（配置 → 启用 UDP 遥测） | `dirt` + `fields` | [模板] 需字段校准（各版本结构差异较大，需使用 `sniff` 校准） |
+| F1 22 / 23 / 24 | UDP **20777** | `fields` | [模板] 需字段校准（按年份版本校准字段偏移） |
+| Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | [支持] 内置（采用实测偏移定义） |
+| rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | [规划中] |
+| iRacing | 内存映射 SDK | — | [规划中] |
 
 > **说明**：Codemasters 系列（DiRT / F1 / EA WRC）在跨代版本中多次变更报文结构，且同一版本可能混合传输不同长度的数据帧。硬编码偏移极易导致扳机动作异常。因此本项目采用「声明式字段配置（fields）+ 现场抓包校准（sniff）」机制，提供精准适配能力。
 
@@ -366,7 +366,7 @@ rules:
 
 ### 音圈触感（`haptics:` 块）
 
-> ✅ **实测状态（Linux, fw 0x0110002a）：可用。**
+> **[实测状态]（Linux, fw 0x0110002a）：可用。**
 > 关键前提：HID 输出报告的 `valid_flag0` 是**应用掩码**。若在 motor 字节为 0 时
 > 仍声明 `COMPATIBLE_VIBRATION|HAPTICS_SELECT`，固件会把执行器锁在 HID 震动
 > 引擎上（幅度 0），**音频通道的音圈信号会被完全忽略**。本项目只在真的有震动
@@ -374,7 +374,7 @@ rules:
 > 另外 `valid_flag0` 的 BIT4-7（音量/audio_control）必须保持清零，否则会静音
 > 整个 USB 音频 DAC（表现为连扬声器都没声音）。
 >
-> 👉 完整设计与踩坑记录：[docs/audio-haptics-and-ffb.md](docs/audio-haptics-and-ffb.md)
+>  完整设计与踩坑记录：[docs/audio-haptics-and-ffb.md](docs/audio-haptics-and-ffb.md)
 
 DS5 同时是一块 4 声道 48kHz USB 声卡，Ch3/4 直连左右音圈。HID 震动字节只能表达
 「振幅 + 一个调幅频率」，是音圈的低分辨率近似；写 PCM 才能真正还原频谱与瞬态。
@@ -406,7 +406,7 @@ haptics:
 
 - **变量范围**：所有[标准信号](#标准信号表)（未定义或过期时为 `0`）。
 - **内置数学函数**：`min`, `max`, `ceil`, `floor`, `round`, `sqrt`, `pow`。
-  ⚠️ 绝对值必须用扩展函数 `absf(x)`：`abs` 是 ABS 介入信号名，信号名会遮蔽同名函数。
+  [注意] 绝对值必须用扩展函数 `absf(x)`：`abs` 是 ABS 介入信号名，信号名会遮蔽同名函数。
 - **扩展工具函数**：
 
 | 函数签名 | 说明 |
@@ -608,9 +608,18 @@ profiles/                 用户自定义 Profile 目录
 - [x] **音频 AI 事件与材质探测器原型（`source/audioai`）**：基于 YAMNet ONNX 模型实时推断水洼/铁板/木板/碎石材质与交火音效（[方案文档](docs/audio-ai-event-detection.md)）
 - [ ] **rFactor 2 / LMU、ETS2 / ATS**：基于桥接架构扩展共享内存布局解析
 - [ ] **iRacing 支持**：接入 iRacing 内存映射 SDK
+- [ ] **触控板虚拟机械齿轮刻度感 (Virtual Detents)**：电容坐标微分与音圈单周期脉冲结合，呈现拟真机械棘轮、换挡旋钮与关键帧吸附手感
+- [ ] **空间声学触觉雷达 (7.1声道)**：环绕声空间低延迟分解，为盲操与竞技提供空间指向性触觉
+- [ ] **枪械机械卡壳与战术排障模拟**：开火过热触发 R2 扳机物理硬性锁死，结合 6 轴 IMU 甩动检测拉栓解卡
+- [ ] **赛车直驱模拟器力矩降维模拟**：将专业 FFB 对齐力矩曲线降维映射至自适应阻力与音圈抓地力极限
+- [ ] **手感黑胶唱片与录制回放系统**：250Hz 控制时序录制与一键预设分发
+- [ ] **双人手柄力矩纠缠网络 (Haptic Tether)**：局域网物理力矩同步对抗与协同驾驶
 - [ ] **触控板多指手势识别**：支持双指滑动、捏合映射为虚拟轮盘/旋钮
 - [ ] **焦点窗口仲裁**：依据前台活跃窗口自动平滑切换 Profile
 - [ ] **遥测录制与回放（`ds5d replay`）**：支持数据录制，用于回归调试
+
+> 完整前沿创新方案设计与可行性评估矩阵，详见专属规划方案：
+> 详细参见 **[DualSense 触觉人机交互前沿探索与高级规划方案 (docs/haptic-explorations.md)](docs/haptic-explorations.md)**
 
 ### Windows 适配缺口
 
@@ -620,14 +629,14 @@ profiles/                 用户自定义 Profile 目录
 
 | 功能 | 现状 | 阻塞点 | 需要的改动 |
 |---|---|---|---|
-| **音频采集**（`source/audio`） | ❌ 仅 Linux | 依赖 `parec` 读 PipeWire monitor | WASAPI loopback 采集工具，或把 `command` 换成 ffmpeg + 虚拟声卡 |
-| **音圈输出**（`sink/haptics`） | ❌ 仅 Linux | 依赖 `pacat` 往 4 声道 sink 写 PCM | 向 DS5 的 4 声道 WASAPI 端点写 PCM 的小工具 |
-| **音圈直通**（`haptics.mode: passthrough`） | ❌ 仅 Linux | 采集与输出双依赖（同上） | 同上两项落地后自动可用 |
-| **AI 推理引擎**（`-tags onnx`） | ⚠️ 代码平台无关，构建未适配 | cgo 需要 mingw-w64 + `onnxruntime.dll`；`engine_onnx.go` 里 include 路径写死 | cgo flags 可配置化 + `build-windows-onnx` 目标 + CI 交叉编译 |
-| **虚拟手柄**（`internal/vpad`） | ❌ Windows 返回 `ErrUnsupported` | 需要虚拟总线驱动 | 接入 ViGEmBus（其 rumble 回调比 uinput 更完整） |
-| **力反馈镜像**（`source/ffb`） | ❌ 依赖虚拟手柄 | 同上一行 | 随 `vpad` 一起落地 |
-| **一键启停脚本**（`scripts/ds5-acr.sh`） | ❌ bash/Unix | — | PowerShell 版本 |
-| **调试工具** `ffclient` / `hidprobe` | ❌ 仅 Linux | 依赖 evdev FF / hidraw ioctl | Windows 对应实现（HID API 已具备） |
+| **音频采集**（`source/audio`） | [未支持] 仅 Linux | 依赖 `parec` 读 PipeWire monitor | WASAPI loopback 采集工具，或把 `command` 换成 ffmpeg + 虚拟声卡 |
+| **音圈输出**（`sink/haptics`） | [未支持] 仅 Linux | 依赖 `pacat` 往 4 声道 sink 写 PCM | 向 DS5 的 4 声道 WASAPI 端点写 PCM 的小工具 |
+| **音圈直通**（`haptics.mode: passthrough`） | [未支持] 仅 Linux | 采集与输出双依赖（同上） | 同上两项落地后自动可用 |
+| **AI 推理引擎**（`-tags onnx`） | [需验证] 代码平台无关，构建未适配 | cgo 需要 mingw-w64 + `onnxruntime.dll`；`engine_onnx.go` 里 include 路径写死 | cgo flags 可配置化 + `build-windows-onnx` 目标 + CI 交叉编译 |
+| **虚拟手柄**（`internal/vpad`） | [未支持] Windows 返回 `ErrUnsupported` | 需要虚拟总线驱动 | 接入 ViGEmBus（其 rumble 回调比 uinput 更完整） |
+| **力反馈镜像**（`source/ffb`） | [未支持] 依赖虚拟手柄 | 同上一行 | 随 `vpad` 一起落地 |
+| **一键启停脚本**（`scripts/ds5-acr.sh`） | [未支持] bash/Unix | — | PowerShell 版本 |
+| **调试工具** `ffclient` / `hidprobe` | [未支持] 仅 Linux | 依赖 evdev FF / hidraw ioctl | Windows 对应实现（HID API 已具备） |
 | **udev 规则** | — 不需要 | Windows 无 udev | 无需适配 |
 | **Valve 手柄音频延迟参数** | — 不需要 | `--latency-msec` 是 PipeWire 工具参数 | 换 WASAPI 后用其 period 参数 |
 

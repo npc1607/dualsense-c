@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 890" width="100%" height="100%">
+  <defs>
+    <filter id="shadow" x="-3%" y="-3%" width="106%" height="106%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.06"/>
+    </filter>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#64748b" />
+    </marker>
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-weight: 800; fill: #0f172a; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 500; fill: #475569; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 16px; }
+      .card-sub { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #64748b; }
+      .desc-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13px; fill: #1e293b; }
+      .code-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; }
+      .axis-label { font-family: ui-monospace, monospace; font-size: 11px; fill: #64748b; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f8fafc" rx="16"/>
+
+  <!-- 顶部主副标题 -->
+  <g transform="translate(600, 48)" text-anchor="middle">
+    <text class="title" font-size="28" y="0">赛车直驱模拟器 FFB 力矩降维与抓地力极限曲线</text>
+    <text class="subtitle" font-size="15" y="30">将专业直驱对齐力矩 (Aligning Torque) 与滑移极限降维映射至自适应扳机与音圈触感</text>
+  </g>
+
+  <!-- ================= 曲线 A: S 形软饱和曲线 (左上) ================= -->
+  <g transform="translate(50, 130)" filter="url(#shadow)">
+    <rect width="535" height="255" rx="12" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+    <text class="card-title" x="24" y="32" fill="#1d4ed8">曲线 A: S 形软饱和力矩 (Soft-Clipping S-Curve)</text>
+    <text class="card-sub" x="24" y="52">横向载荷 lat_g / 转向角 ──► 扳机阻力</text>
+
+    <!-- 曲线图表坐标系 -->
+    <g transform="translate(45, 68)">
+      <!-- 背景网格 -->
+      <line x1="0" y1="110" x2="440" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+      <line x1="0" y1="10" x2="0" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+      <line x1="0" y1="60" x2="440" y2="60" stroke="#f1f5f9" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="220" y1="10" x2="220" y2="110" stroke="#f1f5f9" stroke-width="1" stroke-dasharray="3,3"/>
+
+      <!-- S-Curve 真实曲线 -->
+      <path d="M 0 110 C 140 105, 200 45, 440 22" fill="none" stroke="#2563eb" stroke-width="3"/>
+      
+      <!-- 坐标文字 -->
+      <text class="axis-label" x="430" y="125" text-anchor="end">载荷 lat_g ──►</text>
+      <text class="axis-label" x="8" y="18">阻力 255</text>
+      <text class="axis-label" x="8" y="105">0</text>
+    </g>
+
+    <text class="desc-text" x="24" y="218">• 特点：小转角轻柔精准，中段线性饱满，极限大转角平滑渐近饱和防打手</text>
+    <text class="code-text" x="24" y="238" fill="#1d4ed8">公式：force = clamp(255 * smoothstep(0, 1.2, abs(lat_g)), 0, 255)</text>
+  </g>
+
+  <!-- ================= 曲线 B: 推头失速力矩骤降 (右上) ================= -->
+  <g transform="translate(615, 130)" filter="url(#shadow)">
+    <rect width="535" height="255" rx="12" fill="#ffffff" stroke="#dc2626" stroke-width="2"/>
+    <text class="card-title" x="24" y="32" fill="#b91c1c">曲线 B: 推头失速力矩骤降 (Understeer Slip-Drop)</text>
+    <text class="card-sub" x="24" y="52">前胎滑移率 slip_front ──► 抓地力丧失力矩瞬间落空</text>
+
+    <!-- 曲线图表坐标系 -->
+    <g transform="translate(45, 68)">
+      <line x1="0" y1="110" x2="440" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+      <line x1="0" y1="10" x2="0" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+      <line x1="200" y1="10" x2="200" y2="110" stroke="#fee2e2" stroke-width="1.5" stroke-dasharray="4,4"/>
+
+      <!-- 抓地力达到极限后突降曲线 -->
+      <path d="M 0 100 Q 120 40 190 20 L 220 70 Q 320 75 440 75" fill="none" stroke="#dc2626" stroke-width="3"/>
+      
+      <circle cx="190" cy="20" r="4" fill="#dc2626"/>
+      <text class="axis-label" x="195" y="15" fill="#dc2626" font-weight="700">极限抓地临界点</text>
+
+      <text class="axis-label" x="430" y="125" text-anchor="end">滑移率 slip ──►</text>
+      <text class="axis-label" x="8" y="18">对齐力矩</text>
+      <text class="axis-label" x="8" y="105">0</text>
+    </g>
+
+    <text class="desc-text" x="24" y="218">• 特点：滑移率在极限内阻力扎实，一旦推头失抓，阻力断崖式释放 50% 变轻</text>
+    <text class="code-text" x="24" y="238" fill="#b91c1c">公式：drop = slip > 0.16 ? lerp(1.0, 0.45, (slip - 0.16)/0.2) : 1.0</text>
+  </g>
+
+  <!-- ================= 曲线 C: 轮胎抓地力临界高频啸叫 (左下) ================= -->
+  <g transform="translate(50, 410)" filter="url(#shadow)">
+    <rect width="535" height="255" rx="12" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <text class="card-title" x="24" y="32" fill="#6d28d9">曲线 C: 轮胎抓地力临界微颤 (Grip Boundary Vibration)</text>
+    <text class="card-sub" x="24" y="52">临界摩擦过渡区 ──► 音圈马达 120~180Hz 物理微颤</text>
+
+    <!-- 曲线图表坐标系 -->
+    <g transform="translate(45, 68)">
+      <line x1="0" y1="110" x2="440" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+      <line x1="0" y1="10" x2="0" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+      <rect x="150" y="10" width="120" height="100" fill="#f5f3ff" opacity="0.6"/>
+
+      <!-- 临界钟形/阶梯微颤波形 -->
+      <path d="M 0 110 L 140 110 Q 170 110 190 20 Q 230 20 260 110 L 440 110" fill="none" stroke="#7c3aed" stroke-width="3"/>
+      
+      <text class="axis-label" x="210" y="15" text-anchor="middle" fill="#6d28d9" font-weight="700">抓地极限啸叫区间</text>
+      <text class="axis-label" x="430" y="125" text-anchor="end">滑移率 slip ──►</text>
+      <text class="axis-label" x="8" y="18">微颤强度</text>
+      <text class="axis-label" x="8" y="105">0</text>
+    </g>
+
+    <text class="desc-text" x="24" y="218">• 特点：车辆逼近抓地力极限边缘时，手心产生细密高频嘶鸣，提示极限临界</text>
+    <text class="code-text" x="24" y="238" fill="#6d28d9">公式：haptic = clamp(200 * smoothstep(0.12, 0.20, slip), 0, 180)</text>
+  </g>
+
+  <!-- ================= 曲线 D: 车速感应阻尼增益 (右下) ================= -->
+  <g transform="translate(615, 410)" filter="url(#shadow)">
+    <rect width="535" height="255" rx="12" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+    <text class="card-title" x="24" y="32" fill="#15803d">曲线 D: 车速感应阻尼增益 (Speed-Sensitive Damping)</text>
+    <text class="card-sub" x="24" y="52">车速 speed (km/h) ──► 转向中心阻尼与路感基底</text>
+
+    <!-- 曲线图表坐标系 -->
+    <g transform="translate(45, 68)">
+      <line x1="0" y1="110" x2="440" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+      <line x1="0" y1="10" x2="0" y2="110" stroke="#cbd5e1" stroke-width="1.5"/>
+
+      <!-- 对数/平滑阶梯曲线 -->
+      <path d="M 0 95 Q 120 90 200 45 Q 320 25 440 20" fill="none" stroke="#16a34a" stroke-width="3"/>
+
+      <text class="axis-label" x="430" y="125" text-anchor="end">车速 speed ──►</text>
+      <text class="axis-label" x="8" y="18">阻尼倍率 1.0</text>
+      <text class="axis-label" x="8" y="95">0.3</text>
+    </g>
+
+    <text class="desc-text" x="24" y="218">• 特点：低速倒车移库轻柔灵敏，高速直线巡航自动沉稳下沉，杜绝虚位抖动</text>
+    <text class="code-text" x="24" y="238" fill="#15803d">公式：speed_gain = lerp(0.3, 1.0, smoothstep(20, 120, speed))</text>
+  </g>
+
+  <!-- ================= 底部配置说明框 ================= -->
+  <g transform="translate(50, 690)" filter="url(#shadow)">
+    <rect width="1100" height="165" rx="12" fill="#ffffff" stroke="#0f172a" stroke-width="2"/>
+    <text class="card-title" x="24" y="32" fill="#0f172a">Profile YAML 曲线自定义语法 (Assetto Corsa / ACR 实机支持)</text>
+    <line x1="24" y1="46" x2="1076" y2="46" stroke="#e2e8f0" stroke-width="1.5"/>
+    
+    <g class="code-text" transform="translate(24, 72)">
+      <text y="0" fill="#2563eb">• 基础回正力矩: force: 'clamp(255 * smoothstep(0, 1.2, abs(lat_g)) * (slip > 0.16 ? lerp(1.0, 0.45, (slip - 0.16)/0.2) : 1.0), 0, 255)'</text>
+      <text y="28" fill="#7c3aed">• 极限抓地音圈: target: haptic_left, value: 'clamp(200 * smoothstep(0.12, 0.20, slip), 0, 180)', modulate: { type: sine, hz: 160 }</text>
+      <text y="56" fill="#475569" font-family="-apple-system, sans-serif" font-weight="500">• 调优指导：车手可在 YAML 中修改 smoothstep 临界点与 lerp 衰减幅度，随心定制手感软硬与推头落空时机</text>
+    </g>
+  </g>
+
+</svg>

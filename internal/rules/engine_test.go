@@ -408,3 +408,31 @@ func TestCrossedUsesExplicitThreshold(t *testing.T) {
 		t.Errorf("level above threshold should not retrigger, got %d", f.RumbleL)
 	}
 }
+
+func TestCurveAndSCurveHelpers(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "curve-test",
+		Source: profile.Source{Type: "sim"},
+		Rules: []profile.Rule{{
+			Target: "rumble_left",
+			Value:  "curve(steer, -1.0, 50,  0.0, 100,  1.0, 200)",
+		}, {
+			Target: "rumble_right",
+			Value:  "round(255 * scurve(throttle, 2.0))",
+		}},
+	}
+	set := signal.NewSet(nil)
+	e := mustEngine(t, p, set)
+	base := time.Now()
+
+	apply(set, base, map[string]float32{"steer": 0.5, "throttle": 0.5})
+	f := e.Step(base.Add(time.Millisecond))
+	// curve at 0.5 between (0, 100) and (1, 200) -> 150
+	if f.RumbleL != 150 {
+		t.Errorf("curve(0.5) = %d, want 150", f.RumbleL)
+	}
+	// scurve(0.5, 2) is exactly 0.5 -> 255 * 0.5 rounded = 128
+	if f.RumbleR != 128 {
+		t.Errorf("scurve(0.5) = %d, want 128", f.RumbleR)
+	}
+}

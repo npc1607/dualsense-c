@@ -162,6 +162,48 @@ func (e *Engine) installHelpers() {
 	e.env["floor"] = math.Floor
 	e.env["sin"] = math.Sin
 	e.env["cos"] = math.Cos
+
+	// curve(x, x0, y0, x1, y1, ...) performs piecewise-linear interpolation across
+	// arbitrary control points. Points must be sorted by x. Clamps below x0 and above xN.
+	e.env["curve"] = func(x float64, pts ...float64) float64 {
+		n := len(pts)
+		if n < 2 {
+			return 0
+		}
+		if n%2 != 0 {
+			n--
+		}
+		if x <= pts[0] {
+			return pts[1]
+		}
+		if x >= pts[n-2] {
+			return pts[n-1]
+		}
+		for i := 0; i < n-2; i += 2 {
+			x0, y0 := pts[i], pts[i+1]
+			x1, y1 := pts[i+2], pts[i+3]
+			if x >= x0 && x <= x1 {
+				if x1 == x0 {
+					return y0
+				}
+				t := (x - x0) / (x1 - x0)
+				return y0 + t*(y1-y0)
+			}
+		}
+		return pts[n-1]
+	}
+
+	// scurve(x, power) provides a smooth S-curve / soft-saturation curve for x in [0, 1].
+	e.env["scurve"] = func(x, power float64) float64 {
+		x = clamp01(x)
+		if power <= 0 {
+			power = 1
+		}
+		if x < 0.5 {
+			return 0.5 * math.Pow(2*x, power)
+		}
+		return 1.0 - 0.5*math.Pow(2*(1-x), power)
+	}
 }
 
 func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {

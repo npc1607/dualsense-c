@@ -99,10 +99,20 @@ func (d *DetentController) Update(touchX, touchY float32, active bool) bool {
   - **暴雨滂沱**：结合前述音频 AI 识别，手心呈现细密密集的水珠敲击感。
 
 ### 2. 赛车直驱模拟器力矩降维模拟 (Direct Drive Wheel Emulator)
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/npc1607/dualsense-c/main/docs/direct-drive-curves.svg" alt="赛车直驱模拟器 FFB 力矩降维与抓地力极限曲线" width="100%">
+</p>
+<p align="center">
+  <sub>（注：架构图源文件见 <a href="https://github.com/npc1607/dualsense-c/blob/main/docs/direct-drive-curves.excalidraw">docs/direct-drive-curves.excalidraw</a>，支持在 <a href="https://excalidraw.com">Excalidraw</a> 中导入编辑）</sub>
+</p>
+
 - **技术机制**：专业级赛车模拟器（iRacing, Assetto Corsa, rFactor 2）在输出遥测时包含昂贵直驱方向盘（Direct Drive）专用的物理对齐力矩（Aligning Torque / FFB Torque）；
 - **物理手感表现**：
   - 将力矩物理曲线通过非线性算法映射为 **L2 转向阻力（模拟方向盘受阻）** 与 **左右音圈高频路面颗粒（模拟轮胎抓地力边界）**；
   - 进弯前载荷转移导致手柄手感加重，一旦推头（Understeer）抓地力丧失，扳机阻力瞬间松脱落空，让掌上控制器具备专业直驱方向盘的核心路感反馈。
+- **自定义曲线支持**：
+  - 规则引擎原生内置 `curve(x, pts...)`（多点折线查表插值）与 `scurve(x, power)`（软饱和 S 曲线），车手可在 YAML Profile 中自由定制拐点与阻尼渐进率。
 
 ---
 

@@ -50,7 +50,8 @@ haptics:
   gain: 0.9
 
 rules:
-  # ---- 刹车 → L2 持续阻力 ----------------------------------------------
+  # ---- 刹车 → L2 持续阻力 (支持 curve 自定义非线性曲线) ------------------
+  # 车手可自由修改 curve 拐点坐标，随心定制初段虚位、中段饱满度与触底刚性
   - name: l2-brake
     when: 'has("brake")'
     target: l2
@@ -58,7 +59,7 @@ rules:
     priority: 10
     params:
       start: "0"
-      force: "clamp(18 + 237 * brake, 0, 255)"
+      force: "clamp(curve(brake, 0.0, 18.0, 0.08, 45.0, 0.65, 180.0, 1.0, 255.0), 0, 255)"
 
   # ---- 油门 → R2 持续阻力 ----------------------------------------------
   - name: r2-throttle
@@ -104,6 +105,40 @@ rules:
     priority: 15
     value: "clamp(80 * (custom0 - 5500) / 2500, 0, 255)"
     modulate: { type: sine, hz: 45, depth: 0.5 }
+
+  # ======================================================================
+  # 赛车直驱模拟器 (Direct Drive FFB) 力矩降维与抓地力极限模拟
+  #
+  # 依托物理量：
+  #   - 前轮滑移：slip_fl, slip_fr (前轮滑移量，表征转向附着力)
+  #   - 横向载荷：lat_g (转弯横向加速度 G 值)
+  #   - 车辆航向：steer (方向盘转角)
+  #
+  # 体验特色：
+  #   1. 轮胎抓地力临界高频啸叫：在入弯达到临界附着力边缘时，音圈马达发出 160Hz 细密微颤；
+  #   2. 刹车抱死线性阻尼变化：随着刹车与滑移率增加阻尼加硬；
+  #   3. 推头力矩骤降 (Understeer Slip-Drop)：前轮失抓失速时，右马达释放推头松脱触感；
+  #   4. 曲线完全支持使用 curve(...) 与 scurve(...) 自定义插值拐点！
+  # ======================================================================
+
+  # ---- 轮胎抓地力临界音圈高频微颤 (Grip Boundary Vibration) -----------
+  # 模拟直驱方向盘在轮胎达到最大摩擦力极限时的物理高频嘶鸣微颤
+  - name: dd-grip-limit-vibe
+    when: 'has("lat_g") && absf(lat_g) > 0.35 && max(slip_fl, slip_fr) > 0.35 && max(slip_fl, slip_fr) < 1.4'
+    target: haptic_left
+    priority: 32
+    value: "clamp(210 * smoothstep(0.35, 0.85, max(slip_fl, slip_fr)), 0, 200)"
+    modulate: { type: sine, hz: 160, depth: 0.75 }
+
+  # ---- 推头抓地力丧失 (Understeer Drop) 瞬间松脱与右马达警示 -----------
+  # 超过极限滑移（推头）后，力矩急剧软化，触发推头提示脉冲
+  - name: dd-understeer-drop
+    when: 'max(slip_fl, slip_fr) >= 1.4 && absf(lat_g) > 0.5'
+    target: rumble_right
+    priority: 35
+    hold: 80ms
+    value: "clamp(180 * smoothstep(1.4, 2.8, max(slip_fl, slip_fr)), 0, 220)"
+    modulate: { type: sine, hz: 24, depth: 0.8 }
 
   # ======================================================================
   # 路面细节：路肩 / 颠簸 / 撞击 / 路外

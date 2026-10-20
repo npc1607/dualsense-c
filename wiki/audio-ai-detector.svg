@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 880" width="100%" height="100%">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.07"/>
+    </filter>
+    <filter id="red-shadow" x="-4%" y="-4%" width="108%" height="108%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#e03131" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-gray" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#495057" />
+    </marker>
+    <marker id="arrow-blue" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#1971c2" />
+    </marker>
+    <marker id="arrow-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#e03131" />
+    </marker>
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-weight: 800; fill: #1e1e1e; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 500; fill: #495057; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 19px; }
+      .card-sub { font-family: "SF Mono", "Consolas", Menlo, monospace; font-size: 12.5px; fill: #868e96; }
+      .card-item { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 14px; fill: #2b2b2b; }
+      .tag-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 12.5px; font-weight: 600; fill: #495057; text-anchor: middle; }
+      .blue-text { font-family: "SF Mono", "Consolas", Menlo, monospace; font-size: 12.5px; font-weight: 700; fill: #1971c2; text-anchor: middle; }
+      .cfg-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13px; font-weight: 700; fill: #c92a2a; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#ffffff" rx="16"/>
+
+  <!-- 顶部主副标题 -->
+  <g transform="translate(530, 48)" text-anchor="middle">
+    <text class="title" font-size="28" y="0">Audio AI 游戏事件与材质探测架构</text>
+    <text class="subtitle" font-size="15" y="30">基于本地轻量级 YAMNet ONNX 模型 (纯 CPU INT8) 的无遥测游戏感知与力反馈联动流水线</text>
+  </g>
+
+  <!-- ================= 第一行流水线 ================= -->
+
+  <!-- 卡片 1: 游戏进程 -->
+  <g transform="translate(50, 130)" filter="url(#shadow)">
+    <rect width="340" height="220" rx="14" fill="#f8f9fa" stroke="#adb5bd" stroke-width="2"/>
+    <text class="card-title" x="170" y="36" text-anchor="middle" fill="#212529">游戏进程 (Game Engine)</text>
+    <text class="card-sub" x="170" y="56" text-anchor="middle">Unreal / Unity / 自研引擎 (48kHz 混音)</text>
+    <line x1="25" y1="72" x2="315" y2="72" stroke="#dee2e6" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• 物理脚步材质声 (水洼 / 铁网 / 木板 / 碎石)</text>
+      <text y="28">• 交火与战斗音效 (枪声 / 机枪连发 / 爆炸波)</text>
+      <text y="56">• 主角受击、喘息与心跳危机音效</text>
+      <text y="84">• 零侵入：无需游戏 Mod，无需内存 Hook</text>
+    </g>
+  </g>
+
+  <!-- 连线 1 -> 2 -->
+  <line x1="390" y1="240" x2="450" y2="240" stroke="#495057" stroke-width="2.2" marker-end="url(#arrow-gray)"/>
+  <rect x="395" y="212" width="60" height="20" rx="4" fill="#f1f3f5"/>
+  <text class="tag-text" x="425" y="226">声卡环回</text>
+
+  <!-- 卡片 2: Audio AI 伴生探测器 -->
+  <g transform="translate(460, 130)" filter="url(#shadow)">
+    <rect width="450" height="220" rx="14" fill="#ebfbee" stroke="#0ca678" stroke-width="2"/>
+    <text class="card-title" x="225" y="36" text-anchor="middle" fill="#0ca678">Audio AI 伴生探测器 (Sidecar)</text>
+    <text class="card-sub" x="225" y="56" text-anchor="middle">tools/yamnet_bridge (YAMNet ONNX INT8)</text>
+    <line x1="25" y1="72" x2="425" y2="72" stroke="#b2f2bb" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• WASAPI / PipeWire 实时无损环回录音 (16kHz 降采样)</text>
+      <text y="28">• 短时傅里叶变换 (STFT) 提取 64 维 Mel 频谱特征</text>
+      <text y="56">• YAMNet ONNX 极轻量推理 (纯 CPU 耗时仅 1~2ms)</text>
+      <text y="84">• 指数平滑滤波 (EMA) 降噪并过滤背景音乐干扰</text>
+    </g>
+  </g>
+
+  <!-- 连线 2 -> 3 (折返向下一行) -->
+  <path d="M 910 240 L 970 240 Q 985 240 985 260 L 985 490 Q 985 510 965 510 L 920 510" fill="none" stroke="#1971c2" stroke-width="2.5" marker-end="url(#arrow-blue)"/>
+  <rect x="925" y="360" width="115" height="24" rx="4" fill="#e7f5ff" stroke="#a5d8ff"/>
+  <text class="blue-text" x="982" y="376">UDP 9998 传输</text>
+
+  <!-- ================= 第二行流水线 ================= -->
+
+  <!-- 卡片 3: dualsense-c 守护进程 -->
+  <g transform="translate(460, 400)" filter="url(#shadow)">
+    <rect width="450" height="220" rx="14" fill="#e7f5ff" stroke="#1971c2" stroke-width="2"/>
+    <text class="card-title" x="225" y="36" text-anchor="middle" fill="#1971c2">dualsense-c 守护进程 (ds5d)</text>
+    <text class="card-sub" x="225" y="56" text-anchor="middle">Source: audio_ai ──► Rules 引擎 ──► Sink 时钟</text>
+    <line x1="25" y1="72" x2="425" y2="72" stroke="#a5d8ff" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• source/audioai 接收 JSON / DS5A 二进制高频数据帧</text>
+      <text y="28">• 注入 signal.Set (surface_water, audio_gunshot...)</text>
+      <text y="56">• rules 表达式实时求值：优先级裁决、脉冲锁存与平滑衰减</text>
+      <text y="84">• 125~250Hz 固定时钟调度 HID 报告与音圈触感输出</text>
+    </g>
+  </g>
+
+  <!-- 连线 3 -> 4 (向左) -->
+  <line x1="460" y1="510" x2="400" y2="510" stroke="#495057" stroke-width="2.2" marker-end="url(#arrow-gray)"/>
+  <rect x="405" y="482" width="50" height="20" rx="4" fill="#f1f3f5"/>
+  <text class="tag-text" x="430" y="496">驱动下发</text>
+
+  <!-- 卡片 4: DualSense 实体控制器 -->
+  <g transform="translate(50, 400)" filter="url(#shadow)">
+    <rect width="340" height="220" rx="14" fill="#f1f3f5" stroke="#343a40" stroke-width="2"/>
+    <text class="card-title" x="170" y="36" text-anchor="middle" fill="#212529">DualSense 实体控制器</text>
+    <text class="card-sub" x="170" y="56" text-anchor="middle">自适应阻力扳机 + 音圈高清触感</text>
+    <line x1="25" y1="72" x2="315" y2="72" stroke="#ced4da" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <g class="card-item" transform="translate(24, 102)">
+      <text y="0">• 自适应扳机：瞄准阻尼挡墙 + 开火强击退断点</text>
+      <text y="28">• 音圈触感 (Ch3/4)：涉水微颤 + 金属空腔清脆回响</text>
+      <text y="56">• 双马达震动：爆炸低频重击 + 枪机机械后坐力</text>
+      <text y="84">• RGB 灯条：残血红光闪烁 + 充电冰蓝呼吸</text>
+    </g>
+  </g>
+
+  <!-- ================= 第三行: 声明式联动配置中心 ================= -->
+
+  <g transform="translate(50, 660)" filter="url(#red-shadow)">
+    <rect width="860" height="185" rx="16" fill="#fff5f5" stroke="#e03131" stroke-width="2.5"/>
+    <text class="card-title" x="430" y="35" text-anchor="middle" fill="#c92a2a" font-size="20">⚙️ profiles/audio-ai-demo.yaml 声明式联动规则</text>
+    <text class="card-sub" x="430" y="56" text-anchor="middle" font-size="13.5">将模型识别出的高层语义事件，以毫秒级规则无缝映射为自适应阻力与振动纹理</text>
+    <line x1="30" y1="72" x2="830" y2="72" stroke="#ffc9c9" stroke-width="1.5" stroke-dasharray="4,4"/>
+    
+    <g class="card-item" transform="translate(32, 102)" font-size="14.5">
+      <text y="0">• <tspan font-weight="700">source 块</tspan>：声明 type: audio_ai、listen: 127.0.0.1:9998、signal_ttl: 600ms 超时失效安全保护</text>
+      <text y="28">• <tspan font-weight="700">材质触感</tspan>：when: 'surface_water > 0.4' ──► 左右马达驱动 60Hz 细腻水波微颤 (sine modulate)</text>
+      <text y="56">• <tspan font-weight="700">战况反馈</tspan>：when: 'audio_gunshot > 0.5' ──► 瞬间触发 hold: 120ms 右马达后坐力脉冲</text>
+    </g>
+  </g>
+
+  <!-- 向上注入连线 -->
+  <path d="M 685 660 L 685 628" fill="none" stroke="#e03131" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrow-red)"/>
+  <rect x="620" y="632" width="130" height="22" rx="4" fill="#ffe3e3" stroke="#ffa8a8"/>
+  <text class="cfg-text" x="685" y="647">注入 YAML 映射策略</text>
+
+</svg>

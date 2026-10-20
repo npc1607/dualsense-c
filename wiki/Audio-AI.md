@@ -23,6 +23,15 @@ make build-onnx     # → bin/ds5d-onnx
 ./bin/ds5d-onnx -profiles ./profiles -profile far-far-west-hd -rate 125 -trace
 ```
 
+## 架构与数据处理流水线
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/npc1607/dualsense-c/main/docs/audio-ai-detector.svg" alt="Audio AI 游戏事件与材质探测架构" width="100%">
+</p>
+<p align="center">
+  <sub>（注：架构图源文件见 <a href="https://github.com/npc1607/dualsense-c/blob/main/docs/audio-ai-detector.excalidraw">docs/audio-ai-detector.excalidraw</a>，支持在 <a href="https://excalidraw.com">Excalidraw</a> 中导入编辑）</sub>
+</p>
+
 ## 推理流程
 
 ```

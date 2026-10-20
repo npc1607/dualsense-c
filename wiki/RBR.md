@@ -39,15 +39,15 @@ NGP.udpTelemetry=1
 
 ## 2. 包结构（`profile rbr` 的依据）
 
-来源：游戏自带官方头文件
-`Plugins/NGP/sdk/rbr.telemetry.data.TelemetryData.h`，`#pragma pack(1)`，**定长 664 字节**：
+数据包来源于游戏自带官方头文件 `Plugins/NGP/sdk/rbr.telemetry.data.TelemetryData.h`，遵循 `#pragma pack(1)` 字节对齐，**定长 664 字节**：
 
-```
-u32 totalSteps                     0
-Stage   (i32 + 4×f32)              4 .. 23
-Control (5×f32 + i32 + 2×f32)     24 .. 55
-Car     (608 字节)                 56 .. 663
-```
+| 数据段名称 | 偏移区间 (字节) | 占用大小 | 包含字段与数据类型说明 |
+|---|---|---|---|
+| `totalSteps` | `0 .. 3` | 4 字节 | `uint32_t` 仿真物理步数计数器 |
+| `Stage` | `4 .. 23` | 20 字节 | `int32_t` 赛段状态 + 4 个 `float32` (赛段进度 0..1、比赛计时、剩余距离等) |
+| `Control` | `24 .. 55` | 32 字节 | 5 个 `float32` (方向盘、油门、脚刹、手刹、离合) + 1 个 `int32_t` 挡位 + 2 个 `float32` 踏板压力 |
+| `Car` | `56 .. 663` | 608 字节 | 车身动力学数据（车速、三向加速度、转速）及 LF/RF/LB/RB 四轮悬挂阻尼与胎温（每轮独立 128 字节） |
+| **完整包体** | **0 .. 663** | **664 字节** | 严格定长连续二进制流 |
 
 `Car` 里对触感有用的字段：
 

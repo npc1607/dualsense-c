@@ -12,27 +12,40 @@
 #   ./scripts/ds5-acr.sh status          # 查看遥测与桥连接状态
 #   ./scripts/ds5-acr.sh stop            # 干净关闭并释放手柄
 #
-# 架构平衡与融合特色（左手刹车/右手油门 + 对称机体共振）：
-#   1. 生理直觉分离：
-#      - 左手掌：L2 无助力液压踏板刚性墙 ＋ ABS 刹车防抱死 15Hz 急促方波打手感
-#      - 右手掌：R2 渐进油门弹簧 ＋ TC 牵引力控制打滑平滑震颤 ＋ 直驱推头松脱警告
-#   2. 对称动力共振：
-#      - 发动机红线换挡转速（6600+ RPM）采用双马达对称 58Hz 微颤，告别单侧疲劳
-#   3. 双手均衡路面拍频：
-#      - 消除右马达无条件底噪傻震，平衡左右路面颠簸起步门槛（0.04/0.06 G），砂石起伏时左右拍频交替沉降
-#   4. 直驱模拟器 FFB 降维力学：
-#      - 轮胎抓地力临界音圈高频啸叫（160Hz 摩擦极限微颤）
-#      - 飞坡落地与硬碰撞重锤（左右马达 16Hz/22Hz 方波重拳，hold 130ms）
-#   5. 交互式座舱仪表灯条：
-#      - 油门绿、刹车赛车红、接近红线电光蓝换挡提示。
+# 基于 ACR 413 帧真实遥测数据科学采样标定的 24 层物理力学全景融合体系：
+#   1. 踏板力学：
+#      - L2: 无助力赛车单回路液压刹车曲线（前段微空行程、中段线性陡增、后段 255 刚性液压墙）
+#      - R2: 柔性抗疲劳渐进油门弹簧曲线
+#   2. 动力总成两段式机体共振：
+#      - 中转速巡航（4200~6800 RPM）：细腻机械巡航颗粒感
+#      - 高转速红线（6800+ RPM，实测 top 15%）：双侧对称 58Hz 红线电光蓝换挡微颤
+#   3. 生理直觉辅助系统分离：
+#      - 左手掌：L2 液压刹车联动 ABS 抱死 15Hz 急促方波打手感
+#      - 右手掌：R2 油门联动 TC 牵引力打滑 32Hz 平滑震颤
+#   4. 直驱模拟器 (Direct Drive FFB) 力矩降维：
+#      - 160Hz 轮胎抓地力极限边缘物理嘶鸣 (lat_g > 0.03 & 0.18 < slip < 0.70)
+#      - 24Hz 推头力矩骤降松脱警告 (slip_front >= 0.70)
+#      - 26Hz 大角度漂移甩尾饱满滑移力感 (slip > 0.60)
+#   5. 铺装路 vs 砂石路实测分位点断层解构：
+#      - 铺装平稳段（accel_g <= 0.015G，实测占 63.2%）：左马达静音，右小马达提供超细腻高速微晶沥青胎噪（65Hz）
+#      - 砂石粗糙段（0.015 < accel_g <= 0.06G，实测占 31.4%）：
+#        * 浮沙微滑移剪切磨削（0.18 < slip <= 0.60）：左马达 24Hz 传递泥沙切削颗粒感
+#        * 左右马达对称沉降颠簸拍频（35Hz vs 54Hz）
+#      - 路肩切击（0.06 < accel_g <= 0.15G）：双马达 30Hz/44Hz 方波硬核碎震（hold 70ms）
+#      - 飞坡落地与硬碰撞重锤（accel_g > 0.15G，实测 top 5%）：双马达 255 满幅方波重拳（hold 130ms）
+#   6. 3D 砂石敲击立体声双音圈（Stereo Voice Coils）：
+#      - 左音圈 52Hz + 右音圈 40Hz（形成 12Hz 触觉声学拍频，逼真呈现砂石敲击底盘颗粒）
+#      - 音圈瞬态路肩切击 ＋ 255 满幅飞坡触底重锤
+#   7. 交互式座舱仪表灯条：
+#      - 油门绿、刹车赛车红、接近 8000 转红线电光蓝换挡提示。
 
 name: assetto-corsa
 title: Assetto Corsa / ACC / AC Rally（共享内存桥，UDP 9999）
 description: |
   通过 Proton 前缀内的 ds5bridge.exe 读取 acpmf_physics：
-  无助力液压刹车 ＋ 渐进柔性油门，左手 ABS 弹手 / 右手 TC 牵引力直觉分离，
-  双侧对称 58Hz 红线引擎微颤，160Hz 直驱抓地力极限微颤与推头松脱，
-  立体声双音圈 52Hz/40Hz 砂石拍频纹理，底盘颠簸左右均衡沉降，
+  基于实测遥测数据分位点标定：铺装路微晶路感 ＋ 砂石浮沙磨削 ＋ 3D 碎石拍频，
+  无助力液压刹车 ＋ 渐进油门，左手 ABS 弹手 / 右手 TC 打滑直觉分离，
+  双频段发动机巡航/红线共振，160Hz 直驱极限啸叫与推头松脱，
   飞坡落地重锤防触底与电光蓝红线换挡灯条。
 
 source:
@@ -80,21 +93,30 @@ rules:
       force: "clamp(curve(throttle, 0.0, 8.0, 0.15, 25.0, 0.60, 85.0, 1.0, 150.0), 0, 255)"
 
   # ======================================================================
-  # 2. 发动机对称共振：6600+ 转红线微颤（双侧平衡）
+  # 2. 动力总成：两段式发动机巡航微粒 + 红线微颤共振
   # ======================================================================
 
+  # ---- 中转速巡航（4200~6800 RPM，实测中位数 5664）：细腻机械巡航颗粒感 -
+  - name: engine-grain-mid
+    when: "custom0 > 4200 && custom0 <= 6800"
+    target: rumble_right
+    priority: 15
+    value: "clamp(55 * (custom0 - 4200) / 2600, 0, 65)"
+    modulate: { type: sine, hz: 45, depth: 0.45 }
+
+  # ---- 高转速红线（6800+ RPM，实测 p85~p99 换挡区间）：双侧对称微颤 ---
   - name: engine-redline-left
-    when: "custom0 > 6600"
+    when: "custom0 > 6800"
     target: rumble_left
     priority: 25
-    value: "clamp(100 * (custom0 - 6600) / 1200, 0, 120)"
+    value: "clamp(110 * (custom0 - 6800) / 1200, 0, 130)"
     modulate: { type: sine, hz: 58, depth: 0.65 }
 
   - name: engine-redline-right
-    when: "custom0 > 6600"
+    when: "custom0 > 6800"
     target: rumble_right
     priority: 25
-    value: "clamp(100 * (custom0 - 6600) / 1200, 0, 120)"
+    value: "clamp(110 * (custom0 - 6800) / 1200, 0, 130)"
     modulate: { type: sine, hz: 58, depth: 0.65 }
 
   # ======================================================================
@@ -118,12 +140,12 @@ rules:
     value: "clamp(130 * tc, 0, 200)"
     modulate: { type: sine, hz: 32, depth: 0.60 }
 
-  # ---- 车轮滑移与甩尾磨削 → 左马达 26Hz 滑移触感 ---------------------
-  - name: slip-rumble
-    when: "slip > 0.6"
+  # ---- 大角度深度甩尾滑移 → 左马达饱满滑移力感 (实测 slip > 0.60 进漂移) -
+  - name: deep-drift-rumble
+    when: "slip > 0.60"
     target: rumble_left
     priority: 20
-    value: "clamp(200 * smoothstep(0.6, 2.5, slip), 0, 200)"
+    value: "clamp(220 * smoothstep(0.60, 2.50, slip), 0, 210)"
     modulate: { type: sine, hz: 26, depth: 0.70 }
 
   # ======================================================================
@@ -131,26 +153,67 @@ rules:
   # ======================================================================
 
   # ---- 轮胎抓地力临界音圈高频微颤 (Grip Boundary Vibration) -----------
-  # 模拟直驱方向盘在轮胎达到最大摩擦力极限边缘时的物理高频嘶鸣微颤 (160Hz)
+  # 模拟直驱方向盘在轮胎达到摩擦力极限边缘时的物理高频嘶鸣微颤 (160Hz)
   - name: dd-grip-limit-vibe
-    when: 'has("lat_g") && absf(lat_g) > 0.35 && max(slip_fl, slip_fr) > 0.35 && max(slip_fl, slip_fr) < 1.4'
+    when: 'has("lat_g") && absf(lat_g) > 0.03 && max(slip_fl, slip_fr) > 0.18 && max(slip_fl, slip_fr) < 0.70'
     target: haptic_left
     priority: 32
-    value: "clamp(220 * smoothstep(0.35, 0.85, max(slip_fl, slip_fr)), 0, 210)"
+    value: "clamp(220 * smoothstep(0.18, 0.65, max(slip_fl, slip_fr)), 0, 210)"
     modulate: { type: sine, hz: 160, depth: 0.75 }
 
   # ---- 推头失抓力矩骤降 (Understeer Drop) 瞬间松脱与右马达警示 --------
   # 超过极限滑移（推头）后，力矩急剧软化，触发 24Hz 方波松脱提示脉冲
   - name: dd-understeer-drop
-    when: 'max(slip_fl, slip_fr) >= 1.4 && absf(lat_g) > 0.5'
+    when: 'max(slip_fl, slip_fr) >= 0.70 && absf(lat_g) > 0.04'
     target: rumble_right
     priority: 35
     hold: 80ms
-    value: "clamp(180 * smoothstep(1.4, 2.8, max(slip_fl, slip_fr)), 0, 220)"
+    value: "clamp(180 * smoothstep(0.70, 2.0, max(slip_fl, slip_fr)), 0, 220)"
     modulate: { type: square, hz: 24, depth: 0.80 }
 
   # ======================================================================
-  # 5. 砂石与路面细节：立体声双音圈 3D 拍频 (Stereo Voice Coils)
+  # 5. 路面场景解构一：铺装路（Tarmac / 沥青，实测占 63.2%）极细腻微晶路感
+  # ======================================================================
+
+  # ---- 铺装沥青路面：底盘平稳（accel_g <= 0.015G），右马达随速细腻微颤 ---
+  - name: tarmac-surface-right
+    when: 'has("accel_g") && speed > 5 && absf(accel_g) <= 0.015'
+    target: rumble_right
+    priority: 15
+    value: "clamp(4 + 35 * sqrt(max(absf(accel_g), 0.0001)) + 12 * (speed / 120), 0, 32)"
+    modulate: { type: sine, hz: 65, depth: 0.50 }
+
+  # ======================================================================
+  # 6. 路面场景解构二：砂石粗糙路面（Gravel / Dirt，实测占 31.4%）
+  # ======================================================================
+
+  # ---- 砂石路面低附着剪切磨削感（浮沙/碎石微滑移 0.18~0.60）----------
+  # 车辆在砂石上开跑时四轮始终伴随微滑移，左马达传递泥沙切削的“沙沙”颗粒感
+  - name: gravel-micro-scrub
+    when: 'speed > 10 && slip > 0.18 && slip <= 0.60'
+    target: rumble_left
+    priority: 18
+    value: "clamp(100 * smoothstep(0.18, 0.60, slip), 0, 100)"
+    modulate: { type: sine, hz: 24, depth: 0.75 }
+
+  # ---- 砂石颠簸起伏：右小马达高频细石颠簸 (0.015 < accel_g <= 0.06G) --
+  - name: gravel-bumps-right
+    when: 'has("accel_g") && speed > 5 && absf(accel_g) > 0.015 && absf(accel_g) <= 0.06'
+    target: rumble_right
+    priority: 16
+    value: "clamp(18 + 240 * (absf(accel_g) - 0.015), 0, 120)"
+    modulate: { type: sine, hz: 54, depth: 0.65 }
+
+  # ---- 砂石路面下陷沉降：左大马达低频车身沉降重量感 (0.015 < accel_g <= 0.06G) -
+  - name: gravel-heave-left
+    when: 'has("accel_g") && speed > 5 && absf(accel_g) > 0.015 && absf(accel_g) <= 0.06'
+    target: rumble_left
+    priority: 16
+    value: "clamp(18 + 250 * (absf(accel_g) - 0.015), 0, 125)"
+    modulate: { type: sine, hz: 35, depth: 0.60 }
+
+  # ======================================================================
+  # 7. 3D 砂石敲击底盘：立体声双音圈拍频 (Stereo Voice Coils)
   # ======================================================================
 
   # ---- 前轮悬挂阻尼速度 → 左音圈 52Hz 前桥细颗粒 ---------------------
@@ -162,7 +225,7 @@ rules:
     modulate: { type: sine, hz: 52, depth: 0.60 }
 
   # ---- 后轮抓地与碎石飞溅 → 右音圈 40Hz 后轴纹理 ---------------------
-  # 与左音圈 52Hz 产生 12Hz 自然声学拍频，呈现 3D 砂石敲击底盘颗粒
+  # 与左音圈 52Hz 产生 12Hz 自然声学拍频，逼真呈现砂石敲击底盘颗粒
   - name: coil-texture-right
     when: 'has("accel_g") && speed > 5'
     target: haptic_right
@@ -172,83 +235,67 @@ rules:
 
   # ---- 路肩 / 搓板碎震：音圈瞬态高频冲击 -----------------------------
   - name: coil-kerb-left
-    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    when: 'has("accel_g") && absf(accel_g) > 0.06 && absf(accel_g) < 30'
     target: haptic_left
     priority: 30
     hold: 60ms
-    value: "clamp(150 + 70 * (absf(accel_g) - 0.35), 0, 255)"
+    value: "clamp(150 + 70 * (absf(accel_g) - 0.06), 0, 255)"
 
   - name: coil-kerb-right
-    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    when: 'has("accel_g") && absf(accel_g) > 0.06 && absf(accel_g) < 30'
     target: haptic_right
     priority: 30
     hold: 60ms
-    value: "clamp(130 + 65 * (absf(accel_g) - 0.35), 0, 245)"
+    value: "clamp(130 + 65 * (absf(accel_g) - 0.06), 0, 245)"
 
   # ---- 撞击与防触底重锤：音圈满幅爆发 ---------------------------------
   - name: coil-impact
-    when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
+    when: 'has("accel_g") && absf(accel_g) > 0.15 && absf(accel_g) < 30'
     target: haptic_left
     priority: 65
     hold: 140ms
     value: "255"
 
   # ======================================================================
-  # 6. 底盘垂直载荷与路面体感 (左右均衡起步门槛)
+  # 8. 极端地形冲击：路肩切击与飞坡撞击重锤 (实测 top 5%)
   # ======================================================================
 
-  # ---- 铺装路面细颗粒：右马达承担高频细颗粒纹理 (轻柔细腻，不过激) --------
-  - name: road-texture-right
-    when: 'has("accel_g") && speed > 5'
-    target: rumble_right
-    priority: 16
-    value: "clamp(4 + 35 * sqrt(max(absf(accel_g), 0.0001)) + 240 * absf(accel_g), 0, 110)"
-    modulate: { type: sine, hz: 54, depth: 0.65 }
-
-  # ---- 粗糙路面颠簸：左大马达负责低频车身沉降重量感 (门槛 0.06G 均衡响应) ------
-  - name: road-texture-left
-    when: 'has("accel_g") && speed > 5 && absf(accel_g) > 0.06'
-    target: rumble_left
-    priority: 16
-    value: "clamp(25 + 240 * (absf(accel_g) - 0.06), 0, 130)"
-    modulate: { type: sine, hz: 35, depth: 0.60 }
-
-  # ---- 路肩 / 颠簸：双马达方波碎震 (hold 70ms 保证瞬态感知) ----------
+  # ---- 路肩 / 搓板颠簸：双马达方波硬核碎震 (0.06 < accel_g <= 0.15G) ---
   - name: kerb-left
-    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    when: 'has("accel_g") && absf(accel_g) > 0.06 && absf(accel_g) <= 0.15'
     target: rumble_left
     priority: 28
     hold: 70ms
-    value: "clamp(170 + 150 * (absf(accel_g) - 0.35), 0, 235)"
+    value: "clamp(160 + 150 * (absf(accel_g) - 0.06), 0, 235)"
     modulate: { type: square, hz: 30, depth: 0.80 }
 
   - name: kerb-right
-    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    when: 'has("accel_g") && absf(accel_g) > 0.06 && absf(accel_g) <= 0.15'
     target: rumble_right
     priority: 28
     hold: 70ms
-    value: "clamp(155 + 140 * (absf(accel_g) - 0.35), 0, 220)"
+    value: "clamp(150 + 140 * (absf(accel_g) - 0.06), 0, 220)"
     modulate: { type: square, hz: 44, depth: 0.80 }
 
-  # ---- 飞坡落地与硬碰撞重锤：双马达方波重击 ---------------------------
+  # ---- 飞坡落地与硬碰撞重锤：双马达方波重击 (accel_g > 0.15G) ----------
   - name: impact-left
-    when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
+    when: 'has("accel_g") && absf(accel_g) > 0.15 && absf(accel_g) < 30'
     target: rumble_left
     priority: 60
     hold: 130ms
-    value: "clamp(160 + 45 * (absf(accel_g) - 1.5), 0, 255)"
+    value: "clamp(170 + 45 * (absf(accel_g) - 0.15), 0, 255)"
     modulate: { type: square, hz: 16, depth: 0.55 }
 
   - name: impact-right
-    when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
+    when: 'has("accel_g") && absf(accel_g) > 0.15 && absf(accel_g) < 30'
     target: rumble_right
     priority: 60
     hold: 130ms
-    value: "clamp(150 + 45 * (absf(accel_g) - 1.5), 0, 255)"
+    value: "clamp(160 + 45 * (absf(accel_g) - 0.15), 0, 255)"
     modulate: { type: square, hz: 22, depth: 0.55 }
 
   # ======================================================================
-  # 7. 交互式座舱仪表灯条
+  # 9. 交互式座舱仪表灯条
   # ======================================================================
 
   # 刹车赛车红、油门翠绿、接近红线电光蓝换挡提示

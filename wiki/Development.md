@@ -35,7 +35,8 @@ internal/
   signal/       信号词表与时间序列
   sink/         时钟驱动；haptics/ 音圈合成与直通
   source/       trigger / udp / audio / ffb / audio_ai / combo / sim
-  vpad/         虚拟手柄后端（Linux uinput / Windows 占位）
+  vpad/         虚拟手柄后端（Linux uinput / Windows ViGEmBus）
+  wasapi/       Windows Core Audio / WASAPI COM 回环采集与 4 声道渲染后端
 assets/radio/   伴生广播与车队电台音频切片资产（.wav）
 docs/           设计与踩坑文档（必读）
 profiles/       用户自定义 profile

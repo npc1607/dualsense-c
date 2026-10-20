@@ -362,11 +362,11 @@ audio: onset loudness=1.000 at=00:12:22.840
 AI 引擎的代码本身是平台无关的（`engine_onnx.go` 同时服务 Linux/Windows），
 Windows 适配需要三块：
 
-| 项 | 现状 | 需要 |
+| 项 | Linux 实现 | Windows 实现 |
 |---|---|---|
-| ONNX Runtime 链接 | cgo 已带 `-lonnxruntime` | 用 mingw 交叉编译 + 随包分发 `onnxruntime.dll` |
-| 音频采集 | `parec`（Linux） | 换成 ffmpeg/虚拟声卡，或写 WASAPI loopback 工具 |
-| 音圈输出 | `pacat`（Linux） | 往 DS5 的 4 声道 WASAPI 端点写 PCM 的小工具 |
+| ONNX Runtime 链接 | `make build-onnx`（`-lonnxruntime`） | `make build-windows-onnx`（支持 `ORT_WIN_DIR` / `MINGW_CC` 与 `_WIN32` 宽字符路径） |
+| 音频采集 | `parec`（PipeWire monitor） | 原生 WASAPI Loopback（`internal/wasapi`，纯 Go COM） |
+| 音圈输出 | `pacat`（4 声道 sink） | 原生 WASAPI 4 声道渲染（`internal/wasapi`，`SPEAKER_QUAD` `0x33`） |
 
 **零改动方案**：Windows 上可以让探测器作为独立进程，通过 UDP 发给
 `source/audio_ai`：

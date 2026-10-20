@@ -25,7 +25,7 @@
   - [3.3 Linux 实现细节](#33-linux-实现细节)
   - [3.4 线协议](#34-线协议)
   - [3.5 已知局限：只能看到 upload，看不到 playback](#35-已知局限只能看到-upload看不到-playback)
-  - [3.6 Windows 适配口子](#36-windows-适配口子)
+  - [3.6 Windows 适配实现](#36-windows-适配实现)
   - [3.7 实测数据](#37-实测数据)
 - [四、踩坑与经验](#四踩坑与经验)
   - [4.1 代码层面的坑](#41-代码层面的坑)
@@ -352,26 +352,26 @@ uinput 只暴露 `upload_effect` / `erase_effect` 两个回调，**没有 playba
 
 想彻底解决需要内核侧回调，或者走 Windows 的 ViGEm（见 3.6）。
 
-### 3.6 Windows 适配口子
+### 3.6 Windows 适配实现
 
 `internal/vpad` 已按平台分层：
 
 | 文件 | 内容 |
 |---|---|
 | `vpad.go` | 平台无关的 `Config` / `Pad` 接口 / `RumbleSink` |
+| `xusb.go` | 平台无关的 DualSense → `XUSB_REPORT`（12 字节）编码与死区处理 |
 | `vpad_linux.go` | uinput 实现 |
-| `vpad_windows.go` | 返回 `ErrUnsupported`，注释里写明 ViGEm 方案 |
+| `vpad_windows.go` | 基于 `ViGEmClient.dll` 的虚拟 Xbox 360 手柄实现 + 原生震动通知回调 |
 | `vpad_other.go` | 其它平台占位 |
 
-Windows 侧落地路径：
+Windows 侧已落地实现：
 
-1. 用 ViGEmBus（或新版 Xbox Gamepad 虚拟设备 API）创建虚拟手柄
-2. 用独占 HID 句柄读物理 DualSense 并转发
-3. 实现 ViGEm 的 rumble 回调 —— **它直接给播放事件**，没有 3.5 的限制
-4. 继续通过同一个 `RumbleSink` 发布，上层代码零改动
+1. 动态加载 `ViGEmClient.dll` 连接 ViGEmBus 驱动并创建虚拟 Xbox 360 手柄
+2. 通过 `internal/device` 读物理 DualSense 输入并编码为 `XUSB_REPORT` 转发
+3. 注册 `vigem_target_x360_register_notification` 原生震动回调 —— **直接拿到实时播放幅度**，没有 3.5 的 upload-only 限制
+4. 继续通过同一个 `RumbleSink` 发布，上层 `cmd/ds5vpad` 与 `source/ffb` 零改动复用
 
-音频侧同理：`haptics.command` 可整体替换成 WASAPI 侧命令（如 `ffplay`/自研工具），
-`source/audio` 的 `command` 也可换成 Windows 采集工具。
+音频侧同理：`internal/wasapi` 已基于纯 Go COM 调用实现共享模式 Loopback 采集与 4 声道（`SPEAKER_QUAD` `0x33`）音圈输出，`source/audio` 与 `sink/haptics` 在 Windows 下默认直连 WASAPI，同時保留 `command` 自定义覆盖能力。
 
 ### 3.7 实测数据
 

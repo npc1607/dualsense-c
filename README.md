@@ -74,8 +74,9 @@
 ### 2. 编译构建
 
 ```bash
-make            # 编译生成 bin/ds5d、bin/ds5ctl、bin/ds5vpad、bin/ds5radio、bin/ffclient 以及 bin/ds5bridge.exe
-make windows    # 交叉编译生成 bin/ds5d.exe 与 bin/ds5ctl.exe（纯 Go，无需外部工具链）
+make                   # 编译生成 bin/ds5d、bin/ds5ctl、bin/ds5vpad、bin/ds5radio、bin/ffclient、bin/hidprobe 以及 bin/ds5bridge.exe
+make windows           # 交叉编译生成全套 Windows 可执行文件（纯 Go，无需外部工具链）
+make build-windows-onnx # 交叉编译带进程内 ONNX 推理的 bin/ds5d-onnx.exe
 ```
 
 ### 3. 配置 Linux 权限（udev 规则，一次性）
@@ -562,15 +563,16 @@ modulate: { type: square, hz: 30, depth: 1.0 }  # 方波调幅（适用于机械
 
 ## 平台支持（Linux / Windows）
 
-硬件控制层已实现跨平台解耦（`internal/device/`）：
+硬件控制层、音频管线与虚拟手柄层均已实现跨平台解耦：
 
-- **Linux**：原生操作 `/dev/hidraw*` 设备节点，性能稳定且延迟低。
-- **Windows**：通过 SetupAPI 枚举设备并通过 Win32 文件句柄读写 HID 报告，代码逻辑与 Linux 保持一致。
+- **Linux**：原生操作 `/dev/hidraw*` 设备节点，使用 PipeWire/PulseAudio（`parec`/`pacat`）采集与输出音圈信号，通过 `/dev/uinput` 创建虚拟手柄。
+- **Windows**：通过 SetupAPI + `hid.dll` 读写 HID 报告，基于纯 Go 的 Core Audio / WASAPI COM（`internal/wasapi`）实现系统回环采集与 4 声道（`SPEAKER_QUAD` `0x33`）音圈直写，并通过 `ViGEmClient.dll` 实现虚拟 Xbox 360 手柄与原生力反馈回调（`ds5vpad.exe`）。
 
-> **Windows 实验性状态说明**：
-> Windows 平台当前已完成代码实现并支持交叉编译，但缺乏长期真机测试。部署至 Windows 时需注意：
-> 1. 验证蓝牙模式下 0x31 报告与 CRC32 校验的兼容性；
-> 2. 避免 Steam Input 等具有独占性或优先级的后台驱动抢占控制器震动端口。
+> **Windows 部署说明**：
+> Windows 默认构建保持 100% 纯 Go（`CGO_ENABLED=0`）。部署至 Windows 时需注意：
+> 1. 音圈功能需使用 USB Type-C 有线连接（DualSense 仅在 USB 模式下暴露 4 声道声卡）；
+> 2. 使用 `ds5vpad.exe` 虚拟手柄需预装 [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) 驱动并将 `ViGEmClient.dll` 置于同目录或 `PATH`；
+> 3. 避免 Steam Input 等具有独占性或优先级的后台驱动抢占控制器震动端口。
 
 ```bash
 make windows
@@ -602,9 +604,9 @@ bin/ds5d.exe -profile fps -trace
 cmd/
   ds5d/                   主守护进程（负责 Source → Rules → Sink 链路调度）
   ds5ctl/                 维护与辅助工具（设备检测、配置预检、抓包校准）
-  ds5vpad/                虚拟手柄与力反馈捕获（uinput / dinput8 / xinput）
+  ds5vpad/                虚拟手柄与力反馈捕获守护进程（Linux uinput / Windows ViGEmBus）
   ds5radio/               伴生广播与情境语音工具（车队电台/领航员/端侧 LLM）
-  ds5bridge/              Windows 共享内存桥接器（在 Proton / Wine 前缀内运行）
+  ds5bridge/              Windows 共享内存桥接器（在 Proton / Wine 前缀内或原生 Windows 运行）
 internal/
   bridge/                 桥接通信协议定义与共享内存结构（AC/ACC/ACR）
   hid/                    HID 输出报告封装与扳机参数库
@@ -615,14 +617,15 @@ internal/
   radio/                  伴生广播系统（DSP 渲染、PTT 滤镜、仲裁器与 LLM 分类器）
   rules/                  表达式解析引擎、优先级控制与状态锁存衰减
   audioai/                YAMNet 推理引擎（ONNX Runtime C API，-tags onnx）
+  wasapi/                 Windows Core Audio / WASAPI COM 回环采集与 4 声道渲染后端
   sink/                   高精度时钟驱动与退出状态重置
     haptics/              音圈输出：合成载波 / 游戏音频直通(passthrough)
-  vpad/                   虚拟手柄后端（Linux uinput / Windows 占位）
+  vpad/                   虚拟手柄后端（Linux uinput / Windows ViGEmBus + XUSB 编码）
   report/                 传输模式自适应输出报告构建
   source/                 数据源驱动接入实现
     trigger/              手柄按键与扳机行程驱动源
     udp/                  UDP 遥测驱动（Forza / OutGauge / DiRT / ACSHM / Fields）
-    audio/                音频包络源（PipeWire monitor → bass/mid/loudness）
+    audio/                音频包络源（PipeWire monitor / WASAPI Loopback → bass/mid/loudness）
     audioai/              音频 AI 事件与材质探测驱动源（YAMNet/ONNX）
     ffb/                  力反馈源（虚拟手柄捕获的 rumble → ffb_left/right）
     sim/                  离线仿真数据源
@@ -631,11 +634,13 @@ udev/
   70-dualsense.rules      Linux 非 root 读写权限规则
   71-ds5vpad.rules        虚拟手柄 uinput 访问权限规则
 scripts/launch-bridge.sh  Proton 前缀桥接启动脚本
-scripts/ds5-acr.sh        ACR/AC/ACC 两段式一键启停脚本
+scripts/ds5-acr.sh        Linux ACR/AC/ACC 一键启停（start/stop/status/logs）
+scripts/ds5-acr.ps1       Windows 原生 ACR/AC/ACC 一键启停脚本（PowerShell）
 scripts/start-llm.sh      本地伴生小模型（Qwen2.5-0.5B）运维脚本
 tools/
   bridgesim/              共享内存桥接数据流本地仿真器
-  ffclient/               力反馈链路测试客户端
+  ffclient/               力反馈震动自测工具（Linux evdev FF / Windows XInput）
+  hidprobe/               跨平台音圈与 HID 输出标志位探测工具
   yamnet_bridge/          Audio AI 伴生探测器（YAMNet ONNX 实时/模拟推理）
 profiles/                 用户自定义 Profile 目录
 ```
@@ -656,9 +661,9 @@ profiles/                 用户自定义 Profile 目录
 - [x] **Assetto Corsa / ACC / AC Rally**：提供 `ds5bridge` Proton 桥接支持与 `acshm` 解码器
 - [x] **全手柄传感器与状态接入**：陀螺仪与加速度计（6 轴）、触控板坐标、电量/充电状态，以及静音灯与玩家指示灯控制
 - [x] **充电呼吸灯与三角函数支持**：规则引擎内置 `sin` / `cos`，通用 Profile 自动支持充电淡蓝呼吸与满电常亮
-- [x] **高清音圈触感（Voice-Coil Haptics）**：`sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM 驱动左右音圈（`haptic_left` / `haptic_right` target），Linux 已验证；Windows 走 `haptics.command` 换成 WASAPI 侧命令即可
-- [x] **力反馈镜像驱动（`source/ffb`）**：`ds5vpad` 用 uinput 建虚拟 Xbox 手柄并独占物理手柄，捕获 FF_RUMBLE 上传幅度后经 UDP 9998 交给 `ds5d`（Linux 已验证；Windows 后端见 `internal/vpad/vpad_windows.go`）
-- [x] **音频包络触感推断（`source/audio`）**：`parec` 抓 monitor → 三段带通（bass/mid/loudness）包络，可直接驱动音圈或马达
+- [x] **高清音圈触感（Voice-Coil Haptics）**：`sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM 驱动左右音圈（`haptic_left` / `haptic_right` target），Linux（`pacat`）与 Windows（原生 WASAPI 4 声道 `SPEAKER_QUAD`）均已适配
+- [x] **力反馈镜像驱动（`source/ffb`）**：`ds5vpad` 创建虚拟 Xbox 360 手柄（Linux `uinput` / Windows `ViGEmBus`）并转发物理手柄输入，捕获游戏震动后经 UDP 9998 交给 `ds5d`
+- [x] **音频包络触感推断（`source/audio`）**：抓取系统回环音频（Linux `parec` / Windows 原生 WASAPI Loopback）→ 三段带通（bass/mid/loudness）包络，可直接驱动音圈或马达
 - [x] **音频 AI 事件与材质探测器原型（`source/audioai`）**：基于 YAMNet ONNX 模型实时推断水洼/铁板/木板/碎石材质与交火音效（[方案文档](docs/audio-ai-event-detection.md)）
 - [ ] **rFactor 2 / LMU、ETS2 / ATS**：基于桥接架构扩展共享内存布局解析
 - [ ] **iRacing 支持**：接入 iRacing 内存映射 SDK
@@ -680,22 +685,22 @@ profiles/                 用户自定义 Profile 目录
 
 代码层面已经跨平台的部分：HID 设备读写（`internal/device/hidraw_windows.go`）、
 输出报告构建、规则引擎、Profile、`trigger` / `udp` / `audio_ai`（UDP）数据源、
-`ds5bridge.exe`（本身就是 Windows 程序）。下表是**尚未适配**的部分：
+`ds5bridge.exe`（本身就是 Windows 程序）。原先尚未适配的模块现已**全部完成适配**：
 
-| 功能 | 现状 | 阻塞点 | 需要的改动 |
+| 功能 | 现状 | 原阻塞点 | 已落地的实现 |
 |---|---|---|---|
-| **音频采集**（`source/audio`） | [未支持] 仅 Linux | 依赖 `parec` 读 PipeWire monitor | WASAPI loopback 采集工具，或把 `command` 换成 ffmpeg + 虚拟声卡 |
-| **音圈输出**（`sink/haptics`） | [未支持] 仅 Linux | 依赖 `pacat` 往 4 声道 sink 写 PCM | 向 DS5 的 4 声道 WASAPI 端点写 PCM 的小工具 |
-| **音圈直通**（`haptics.mode: passthrough`） | [未支持] 仅 Linux | 采集与输出双依赖（同上） | 同上两项落地后自动可用 |
-| **AI 推理引擎**（`-tags onnx`） | [需验证] 代码平台无关，构建未适配 | cgo 需要 mingw-w64 + `onnxruntime.dll`；`engine_onnx.go` 里 include 路径写死 | cgo flags 可配置化 + `build-windows-onnx` 目标 + CI 交叉编译 |
-| **虚拟手柄**（`internal/vpad`） | [未支持] Windows 返回 `ErrUnsupported` | 需要虚拟总线驱动 | 接入 ViGEmBus（其 rumble 回调比 uinput 更完整） |
-| **力反馈镜像**（`source/ffb`） | [未支持] 依赖虚拟手柄 | 同上一行 | 随 `vpad` 一起落地 |
-| **一键启停脚本**（`scripts/ds5-acr.sh`） | [未支持] bash/Unix | — | PowerShell 版本 |
-| **调试工具** `ffclient` / `hidprobe` | [未支持] 仅 Linux | 依赖 evdev FF / hidraw ioctl | Windows 对应实现（HID API 已具备） |
+| **音频采集**（`source/audio`） | [已支持] 原生 WASAPI Loopback | 原依赖 `parec` 读 PipeWire monitor | `internal/wasapi` 纯 Go COM `IAudioCaptureClient` 共享模式回环采集（`float32le`），亦保留 `command` 自定义覆盖 |
+| **音圈输出**（`sink/haptics`） | [已支持] 原生 WASAPI 4 声道渲染 | 原依赖 `pacat` 往 4 声道 sink 写 PCM | 自动匹配 DualSense 声卡端点，通过 `WAVEFORMATEXTENSIBLE`（48kHz 4ch `s16le`，`SPEAKER_QUAD` `0x33`）直写 Ch3/4 音圈 |
+| **音圈直通**（`haptics.mode: passthrough`） | [已支持] WASAPI 采集 + 4 声道输出 | 采集与输出双依赖（同上） | WASAPI Loopback → 25–180 Hz 带通滤波 → WASAPI 4 声道音圈输出 |
+| **AI 推理引擎**（`-tags onnx`） | [已支持] 支持交叉编译与原生构建 | `engine_onnx.go` 宽字符路径与 include 路径 | `_WIN32` 下 UTF-8 → `wchar_t*` 转换 + `ORT_WIN_DIR` / `MINGW_CC` 可配置 + `make build-windows-onnx` |
+| **虚拟手柄**（`internal/vpad`） | [已支持] ViGEmBus（`ViGEmClient.dll`） | 需要虚拟总线驱动 | 动态加载 `ViGEmClient.dll` 创建虚拟 Xbox 360 手柄，注册原生 rumble 通知回调（无 uinput upload-only 限制） |
+| **力反馈镜像**（`source/ffb`） | [已支持] 随 `ds5vpad.exe` 落地 | 依赖虚拟手柄 | `ds5vpad.exe` 捕获 ViGEm 震动回调并通过 `FFB1` UDP 报文推送至 `ds5d.exe` |
+| **一键启停脚本**（`scripts/ds5-acr.ps1`） | [已支持] PowerShell 版本 | 原仅有 bash/Unix 脚本 | 新增 `scripts/ds5-acr.ps1`，支持原生 Windows 下 `ds5d.exe` + `ds5bridge.exe` 启停与状态管理 |
+| **调试工具** `ffclient` / `hidprobe` | [已支持] Windows 原生支持 | 原依赖 evdev FF / hidraw | `ffclient.exe` 基于 `XInputSetState` 发送震动；`hidprobe.exe` 改用跨平台 `internal/device` 接口 |
 | **udev 规则** | — 不需要 | Windows 无 udev | 无需适配 |
-| **Valve 手柄音频延迟参数** | — 不需要 | `--latency-msec` 是 PipeWire 工具参数 | 换 WASAPI 后用其 period 参数 |
+| **Valve 手柄音频延迟参数** | — 不需要 | `--latency-msec` 是 PipeWire 工具参数 | WASAPI 采用 20ms 共享模式缓冲周期与轮询写入 |
 
-> **零改动的兜底方案**：Windows 上可让探测器作为独立进程，通过 UDP 把
+> **零改动的兜底方案**：Windows 上仍可让探测器作为独立进程，通过 UDP 把
 > `surface_*` / `audio_*` 发给 `ds5d.exe`（`source/audio_ai` 线协议平台无关），
 > 不必把模型与音频采集塞进主进程。
 
@@ -703,11 +708,11 @@ profiles/                 用户自定义 Profile 目录
 
 ### Windows 适配路线
 
-- [ ] **P1** `internal/vpad` Windows 后端（ViGEmBus）：虚拟手柄 + FF 回调
-- [ ] **P1** 音圈输出 Windows 工具（4 声道 WASAPI 写入）
-- [ ] **P2** 音频采集 Windows 工具（WASAPI loopback → f32le stdout）
-- [ ] **P2** `engine_onnx.go` 的 cgo 路径可配置 + `build-windows-onnx`
-- [ ] **P3** `scripts/ds5-acr.ps1` 与 Windows 版调试工具
+- [x] **P1** `internal/vpad` Windows 后端（ViGEmBus）：虚拟手柄 + FF 回调
+- [x] **P1** 音圈输出 Windows 后端（4 声道 WASAPI `SPEAKER_QUAD` 写入）
+- [x] **P2** 音频采集 Windows 后端（WASAPI loopback → `float32le`）
+- [x] **P2** `engine_onnx.go` 的 cgo 路径可配置 + `build-windows-onnx`
+- [x] **P3** `scripts/ds5-acr.ps1` 与 Windows 版调试工具（`ffclient.exe` / `hidprobe.exe`）
 
 ---
 
@@ -719,13 +724,13 @@ profiles/                 用户自定义 Profile 目录
 |---|---|---|
 | **`ds5d` / `ds5d.exe`** | 全部 | **核心守护程序**：加载 Profile，接收数据源信号，执行规则运算并以 125~250 Hz 写入控制器 |
 | **`ds5ctl` / `ds5ctl.exe`** | 全部 | **设备与配置工具**：设备枚举、硬件自检、离线规则验证及遥测抓包校准 |
-| **`ds5vpad`** | Linux | **虚拟手柄与力反馈捕获工具**：创建虚拟手柄转发按键并捕获震动供 ffb 源消费 |
-| **`ds5radio`** | 全部 | **伴生广播与情境语音工具**：车队无线电、领航路书与端侧小语言模型伴生广播 |
-| **`ds5bridge.exe`** | Windows / Proton | **共享内存桥接程序**：用于 AC / ACC / AC Rally，在 Proton 前缀内读取共享内存并转为 UDP 回传 |
+| **`ds5vpad` / `ds5vpad.exe`** | 全部 | **虚拟手柄与力反馈捕获**：创建虚拟手柄转发按键并捕获震动供 ffb 源消费 |
+| **`ds5radio` / `ds5radio.exe`** | 全部 | **伴生广播与情境语音工具**：车队无线电、领航路书与端侧小语言模型伴生广播 |
+| **`ds5bridge.exe`** | Windows / Proton | **共享内存桥接程序**：用于 AC / ACC / AC Rally，读取共享内存并转为 UDP 回传 |
 | `profiles/` | 全部 | 自定义 Profile 模版文件（12 种常见内置配置已静态编译入二进制） |
 | `udev/70-dualsense.rules` | Linux | 权限配置文件，配置普通用户对 `/dev/hidraw*` 的读写权限 |
 | `udev/71-ds5vpad.rules` | Linux | 权限配置文件，配置普通用户对 `/dev/uinput` 虚拟手柄的创建权限 |
-| `scripts/ds5-acr.sh` | Linux | ACR/AC/ACC 两段式启动、状态监控与桥注入一键脚本 |
+| `scripts/ds5-acr.sh` / `ds5-acr.ps1` | Linux / Windows | ACR / AC / ACC 一键启停与状态诊断脚本 |
 | `scripts/launch-bridge.sh` | Linux | 便捷启动脚本，自动定位 Steam AppID 前缀并启动桥接程序 |
 | `scripts/start-llm.sh` | Linux | 本地端侧小语言模型（Qwen2.5-0.5B）守护进程启停脚本 |
 

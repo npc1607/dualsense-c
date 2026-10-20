@@ -205,6 +205,7 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 | BeamNG.drive | UDP **4444**（选项 → 其他 → 启用 OutGauge） | `outgauge` | ✅ 内置支持 |
 | Live for Speed | UDP **4444**（选项 → 外设 → OutGauge） | `outgauge` | ✅ 内置支持 |
 | DiRT Rally 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（配置 → 启用 UDP 遥测） | `dirt` + `fields` | ⚠️ 提供模板（各版本结构差异较大，需使用 `sniff` 校准） |
+| 理查德·伯恩斯拉力赛（RBR / RSF，NGP 插件） | UDP **6776**（Plugins → NGP 按 `U` 打开 UDP telemetry） | `fields` | [支持] 内置（`rbr`，按 NGP `TelemetryData.h` 的 pack(1) 664 字节布局） |
 | F1 22 / 23 / 24 | UDP **20777** | `fields` | ⚠️ 提供模板（按年份版本校准字段偏移） |
 | Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | ✅ 内置支持（采用实测偏移定义） |
 | rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | 🚧 规划中 |

@@ -1,0 +1,158 @@
+# 理查德·伯恩斯拉力赛（RBR / RallySimFans 版）—— NGP 内置 UDP 遥测
+#
+# 数据来源：NGP 插件（Plugins/NGP）自带的 UDP telemetry。
+# 包结构来自 Plugins/NGP/sdk/rbr.telemetry.data.TelemetryData.h：
+#   #pragma pack(1)，定长 664 字节（u32 totalSteps + Stage + Control + Car）
+# 这里的 off 就是该头文件按 pack(1) 展开后的字节偏移，改版本后请重新核对。
+#
+# 游戏内必须先打开遥测（两条路任选）：
+#   1) 进游戏 → Plugins → NGP → 按 U 切到开启（值会写回 RichardBurnsRally.ini）
+#   2) 直接改 RichardBurnsRally.ini：
+#        [NGP]
+#        udpTelemetry=1
+#        udpTelemetryEndpoints=127.0.0.1:6776
+#        telemetryTics=5         ; 每 5 个物理 tick 发一包
+#   UDP 遥测只在 GAME 模式（进赛道后）发送，菜单/回放里没有数据。
+#
+# 验证：
+#   ./bin/ds5d -dry-run -profile rbr -trace      # 进赛道后 throttle/brake/speed/rpm 应有变化
+#   ./bin/ds5ctl sniff -listen 0.0.0.0:6776      # 没有数据时先用它确认包里到底有没有东西
+#
+# 调参提示：damper_* 是悬挂阻尼活塞速度，单位取决于 NGP（通常 m/s），
+# 所以下面所有 smoothstep 的阈值都只是起点，按实际路面手感再改。
+
+name: rbr
+title: 理查德·伯恩斯拉力赛（RBR / RSF，NGP UDP 6776）
+description: |
+  NGP UDP 遥测（664 字节定长包，pack(1)）。刹车 → L2 持续阻力，油门 → R2 持续阻力，
+  前/后悬挂阻尼速度 → 音圈路面纹理，落地冲击 → 左右马达，手刹 → 右马达脉冲，
+  刹车/油门 → 灯条红绿，逼近红线 → 灯条蓝。
+
+source:
+  type: udp
+  listen: "0.0.0.0:6776"
+  decoder: fields
+  rate_hz: 120
+  fields:
+    # --- 赛段 ---
+    progress:         { off: 8,   fmt: f32 }   # 赛段进度 0..1
+    race_time:        { off: 12,  fmt: f32 }
+    distance_end:     { off: 20,  fmt: f32 }
+    # --- 驾驶输入 ---
+    steer:            { off: 24,  fmt: f32 }
+    throttle:         { off: 28,  fmt: f32 }
+    brake:            { off: 32,  fmt: f32 }
+    handbrake:        { off: 36,  fmt: f32 }
+    clutch:           { off: 40,  fmt: f32 }
+    gear:             { off: 44,  fmt: s32 }
+    footbrake_press:  { off: 48,  fmt: f32 }
+    # --- 车体 ---
+    speed:            { off: 60,  fmt: f32 }   # kph
+    accel_long:       { off: 112, fmt: f32 }   # 纵向加速度
+    accel_lat:        { off: 116, fmt: f32 }   # 横向加速度
+    accel_vert:       { off: 120, fmt: f32 }   # 垂直加速度（落地）
+    rpm:              { off: 136, fmt: f32 }
+    # --- 悬挂阻尼（LF/RF/LB/RB 每轮 128 字节）---
+    damper_lf:        { off: 180, fmt: f32 }
+    damper_rf:        { off: 308, fmt: f32 }
+    damper_lb:        { off: 436, fmt: f32 }
+    damper_rb:        { off: 564, fmt: f32 }
+    # --- 刹车盘 / 胎温（选做灯条与热衰减）---
+    brake_temp_lf:    { off: 188, fmt: f32 }
+    brake_temp_rf:    { off: 316, fmt: f32 }
+    tread_lf:         { off: 208, fmt: f32 }
+    tread_rf:         { off: 336, fmt: f32 }
+  # 注意：derived 由 udp 解码器编译，环境里只有字段本身，
+  # 没有 clamp/absf 这些规则函数，所以绝对值只能手写。
+  derived:
+    damper_front: "max(max(damper_lf, -damper_lf), max(damper_rf, -damper_rf))"
+    damper_rear:  "max(max(damper_lb, -damper_lb), max(damper_rb, -damper_rb))"
+    # 注意：derived 之间不能互相引用（解码器按 map 顺序编译，顺序不确定），
+    # 所以 jolt 直接从原始字段展开。
+    jolt:         "max(max(max(damper_lf, -damper_lf), max(damper_rf, -damper_rf)), max(max(damper_lb, -damper_lb), max(damper_rb, -damper_rb)))"
+    brake_temp:   "max(brake_temp_lf, brake_temp_rf)"
+
+# 非标准信号（标准词表见 internal/signal/names.go）必须在这里声明，
+# 否则规则表达式里引用会报 "unknown name"。
+signals: [handbrake, accel_lat, accel_vert, damper_front, damper_rear, jolt, brake_temp]
+
+safety:
+  signal_ttl: 500ms
+  release: 250ms
+  status_lightbar: true
+
+rules:
+  # ---- 刹车 → L2 持续阻力 ----------------------------------------------
+  - name: l2-brake
+    when: 'has("brake")'
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(20 + 235 * brake, 0, 255)"
+
+  # ---- 油门 → R2 持续阻力（后段加硬，模拟油门踏板到底） ----------------
+  - name: r2-throttle
+    when: 'has("throttle")'
+    target: r2
+    effect: rigid
+    priority: 10
+    params:
+      start: "0"
+      force: "clamp(10 + 120 * throttle + 60 * smoothstep(0.65, 1, throttle), 0, 255)"
+
+  # ---- 前悬阻尼速度 → 左音圈：碎石/搓板路的高频纹理 --------------------
+  - name: road-front-coil
+    when: 'has("damper_front") && damper_front > 0.02'
+    target: haptic_left
+    priority: 20
+    value: "clamp(220 * smoothstep(0.02, 0.35, damper_front), 0, 200)"
+    modulate: { type: sine, hz: 46, depth: 0.6 }
+
+  # ---- 后悬阻尼速度 → 右音圈：车尾拖拽/打滑 ---------------------------
+  - name: road-rear-coil
+    when: 'has("damper_rear") && damper_rear > 0.02'
+    target: haptic_right
+    priority: 20
+    value: "clamp(200 * smoothstep(0.02, 0.35, damper_rear), 0, 190)"
+    modulate: { type: sine, hz: 38, depth: 0.55 }
+
+  # ---- 冲击（落地/撞石）→ 左右马达，短促 ---------------------------------
+  - name: impact-left
+    when: 'jolt > 0.45'
+    target: rumble_left
+    priority: 40
+    value: "clamp(255 * smoothstep(0.45, 1.2, jolt), 0, 255)"
+    hold: 80ms
+
+  - name: impact-right
+    when: 'jolt > 0.45'
+    target: rumble_right
+    priority: 40
+    value: "clamp(255 * smoothstep(0.45, 1.2, jolt), 0, 255)"
+    hold: 80ms
+
+  # ---- 横向加速度 → 右马达轻震：推头/甩尾的体感 ------------------------
+  - name: lateral-load
+    when: 'has("accel_lat") && absf(accel_lat) > 3'
+    target: rumble_right
+    priority: 20
+    value: "clamp(90 * smoothstep(3, 18, absf(accel_lat)), 0, 200)"
+
+  # ---- 手刹 → 右马达 12Hz 脉冲 -----------------------------------------
+  - name: handbrake
+    when: 'has("handbrake") && handbrake > 0.5'
+    target: rumble_right
+    priority: 30
+    value: "150"
+    modulate: { type: sine, hz: 12, depth: 0.8 }
+
+  # ---- 灯条：刹车红、油门绿、逼近红线加蓝 -------------------------------
+  - name: lightbar
+    target: lightbar
+    priority: 1
+    params:
+      r: "clamp(255 * brake, 0, 255)"
+      g: "clamp(255 * throttle, 0, 255)"
+      b: "clamp(200 * smoothstep(0.86, 0.97, rpm / 8000), 0, 255)"

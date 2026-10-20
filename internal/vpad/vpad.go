@@ -49,6 +49,16 @@ type Config struct {
 	// GrabPath forces a specific physical evdev node to forward. Empty means
 	// auto-detect the first DualSense gamepad.
 	GrabPath string
+	// CombinedTriggers merges L2/R2 into a single centred axis (idle 0 at
+	// rest, R2 positive, L2 negative) instead of two 0..255 axes. DirectInput
+	// era games (e.g. Richard Burns Rally) bind a "combined throttle/brake"
+	// axis and ignore non-centring trigger axes, so they need this layout.
+	CombinedTriggers bool
+	// DInputPedals maps L2/R2 to independent full-range (-32768..32767) DirectInput
+	// pedal axes (ABS_Z and ABS_RZ). Rest is -32768, full press is 32767.
+	// Classic DirectInput racing games (such as Richard Burns Rally) require this
+	// to detect separate throttle and brake axes.
+	DInputPedals bool
 	// PlayerLEDs, Deadzone are optional tuning knobs for the input mapping.
 	Deadzone float32
 	// Logger receives diagnostics.

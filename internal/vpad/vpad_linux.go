@@ -96,6 +96,11 @@ type pad struct {
 
 	mu     sync.Mutex
 	closed bool
+
+	// Last raw trigger positions (0..255), kept so the combined axis can be
+	// recomputed whenever either trigger moves.
+	trigL int32
+	trigR int32
 }
 
 // rumbleEventBytes is sizeof(struct uinput_ff_upload).
@@ -147,16 +152,29 @@ func Open(cfg Config, sink RumbleSink) (Pad, error) {
 	binary.LittleEndian.PutUint16(dev[86:], 0x0110) // version
 	binary.LittleEndian.PutUint32(dev[88:], 16)     // ff_effects_max
 	// stick ranges: -32768..32767; triggers 0..255; dpad -1..1
-	setAbs := func(code int, min, max int32) {
+	//
+	// uinput_user_dev lays out absmax[ABS_CNT], absmin[ABS_CNT], absfuzz[],
+	// absflat[] as *separate arrays of 4-byte entries*, so the second array
+	// starts absCnt*4 bytes (not absCnt) after the first one.
+	setAbs := func(code int, lo, hi int32) {
 		base := 92 + code*4
-		binary.LittleEndian.PutUint32(dev[base+absCnt*0:], uint32(max))
-		binary.LittleEndian.PutUint32(dev[base+absCnt*1:], uint32(min))
+		binary.LittleEndian.PutUint32(dev[base:], uint32(hi))          // absmax
+		binary.LittleEndian.PutUint32(dev[base+absCnt*4:], uint32(lo)) // absmin
 	}
 	for _, c := range []int{absX, absY, absRX, absRY} {
 		setAbs(c, -32768, 32767)
 	}
-	for _, c := range []int{absZ, absRZ} {
-		setAbs(c, 0, 255)
+	if cfg.CombinedTriggers {
+		// Idle sits in the middle so DirectInput games see a centred axis.
+		setAbs(absZ, -32768, 32767)
+		setAbs(absRZ, 0, 255)
+	} else if cfg.DInputPedals {
+		// Independent full-range DirectInput pedals (rest -32768, pressed 32767).
+		setAbs(absZ, -32768, 32767)
+		setAbs(absRZ, -32768, 32767)
+	} else {
+		setAbs(absZ, 0, 255)
+		setAbs(absRZ, 0, 255)
 	}
 	for _, c := range []int{absHat0X, absHat0Y} {
 		setAbs(c, -1, 1)
@@ -346,6 +364,57 @@ func (p *pad) reportUpload(b []byte) {
 	})
 }
 
+// scaleStick maps a DualSense raw stick axis (0..255, center ~128) to the
+// Xbox 360 range (-32768..32767, center 0).
+func scaleStick(val int32) int32 {
+	v := (val - 128) * 32767 / 127
+	if v < -32768 {
+		return -32768
+	}
+	if v > 32767 {
+		return 32767
+	}
+	return v
+}
+
+// clampByte keeps a raw evdev axis value inside the 0..255 trigger range.
+func clampByte(v int32) int32 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return v
+}
+
+// combineTriggers maps (L2, R2) onto one centred axis: rest is 0, R2 drives the
+// positive half and L2 the negative one, matching what DirectInput games expect
+// from a "combined throttle and brake" control.
+func combineTriggers(l, r int32) int32 {
+	v := (r - l) * 32767 / 255
+	if v > 32767 {
+		v = 32767
+	}
+	if v < -32768 {
+		v = -32768
+	}
+	return v
+}
+
+// scalePedal maps a trigger value (0..255) to a full-range unipolar pedal (-32768..32767).
+// Rest (0) is -32768, fully pressed (255) is 32767.
+func scalePedal(val int32) int32 {
+	v := -32768 + (val * 65535 / 255)
+	if v < -32768 {
+		return -32768
+	}
+	if v > 32767 {
+		return 32767
+	}
+	return v
+}
+
 func scale16(v uint16) uint8 {
 	return uint8((uint32(v)*255 + 32767) / 65535)
 }
@@ -362,7 +431,25 @@ func (p *pad) translate(buf []byte) []byte {
 		case evSyn:
 			out = appendEvent(out, evSyn, 0, 0)
 		case evAbs:
+			if p.cfg.CombinedTriggers && (code == absZ || code == absRZ) {
+				// L2 (ABS_Z) drives the negative half, R2 (ABS_RZ) the
+				// positive one; emit a single ABS_Z instead of both.
+				if code == absZ {
+					p.trigL = clampByte(val)
+				} else {
+					p.trigR = clampByte(val)
+				}
+				out = appendEvent(out, evAbs, absZ, combineTriggers(p.trigL, p.trigR))
+				continue
+			}
+			if p.cfg.DInputPedals && (code == absZ || code == absRZ) {
+				out = appendEvent(out, evAbs, code, scalePedal(clampByte(val)))
+				continue
+			}
 			if mapped, ok := mapAbs(code); ok {
+				if code == absX || code == absY || code == absRX || code == absRY {
+					val = scaleStick(val)
+				}
 				out = appendEvent(out, evAbs, mapped, val)
 			}
 		case evKey:

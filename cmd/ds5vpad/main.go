@@ -34,6 +34,8 @@ func main() {
 		grab    = flag.String("grab", "", "physical evdev node to grab (default: auto-detect DualSense)")
 		publish = flag.String("publish", ffb.DefaultListen, "UDP address to publish rumble to")
 		hz      = flag.Int("hz", 60, "rumble publish rate")
+		comb    = flag.Bool("combined-triggers", false, "merge L2/R2 into one centred axis (idle 0, R2 +, L2 -); needed by DirectInput era games such as Richard Burns Rally")
+		dinput  = flag.Bool("dinput", false, "scale L2/R2 as separate full-range (-32768..32767) DirectInput pedal axes for games like RBR")
 		quiet   = flag.Bool("quiet", false, "only log errors")
 		showVer = flag.Bool("version", false, "print version and exit")
 	)
@@ -93,6 +95,8 @@ func main() {
 	cfg := vpad.DefaultConfig()
 	cfg.Name = *name
 	cfg.GrabPath = *grab
+	cfg.CombinedTriggers = *comb
+	cfg.DInputPedals = *dinput
 	cfg.Logger = logger
 
 	sink := func(r vpad.Rumble) {

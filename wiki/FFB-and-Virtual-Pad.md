@@ -17,10 +17,17 @@
 ## 用法
 
 ```bash
-./bin/ds5vpad &                 # 建虚拟手柄 + 独占物理手柄
-./bin/ds5d -profile ffb-recoil  # 消费 9998
-# 在 Steam 里关闭该游戏的 Steam Input，让游戏认虚拟手柄
+# 现代游戏（XInput 协议族，模拟 Xbox 360 手柄）
+./bin/ds5vpad &
+./bin/ds5d -profile ffb-recoil  # 消费 9998 上的力反馈
+
+# 2000 年代经典赛车/老游戏（DirectInput 8 协议族，模拟罗技 6 轴 12 键手柄）
+./bin/ds5vpad -proto dinput8 &
 ```
+
+支持的硬件协议族：
+- `-proto xinput`（默认）：Xbox 360（`045e:028e`），适用于现代游戏与 Steam/Proton 默认映射。
+- `-proto dinput8`：罗技 Dual Action（`046d:c216`），纯正 DirectInput 8 架构，拥有独立的 L2（刹车）/ R2（油门）模拟轴和原始 1..12 编号按钮，完全摆脱 XInput 驱动层将扳机强行合并为单轴的限制。
 
 ## 验证链路（不开游戏）
 

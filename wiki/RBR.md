@@ -9,7 +9,7 @@ DualSense 的自适应扳机。所以在 Linux 上要同时解决两件事：
 ```
 RBR (Proton) ──NGP UDP 6776──► ds5d -profile rbr ──HID──► DS5 扳机/马达/灯条
      ▲
-     └── ds5vpad（uinput 虚拟 Xbox 手柄，独占物理 DS5）◄── 物理 DS5 evdev
+     └── ds5vpad -proto dinput8（uinput 虚拟罗技 DInput8 手柄，独占物理 DS5）◄── 物理 DS5 evdev
 ```
 
 ---
@@ -109,22 +109,26 @@ python3 tools/…                      # 或任意发包脚本
 
 ---
 
-## 4. 输入侧：`ds5vpad -dinput`（经典 DirectInput 独立踏板模式）
+## 4. 输入侧：`ds5vpad -proto dinput8`（原生 DirectInput 8 架构）
 
 RBR 是纯 DirectInput 8 游戏，在 2004 年没有 Xbox 360 手柄的概念，它要求**所有踏板和摇杆都是独立的 16 位满行程轴**：
 - **摇杆**：`-32768..32767`，居中为 0。
-- **踏板（L2 刹车、R2 油门）**：作为独立模拟踏板，未按时为 `-32768`，踩到底为 `32767`（行程高达 65535）。
+- **踏板（L2 刹车、R2 油门）**：作为独立模拟踏板，未按时为 `0`，踩到底为 `32767`。
+- **按键**：标准 DirectInput 原始按键 1..12。
 
-`-dinput` 专门为此而设计：
+`-proto dinput8` 专门为此而设计（基于罗技 Dual Action `046d:c216` 协议）：
 - `ABS_X` / `ABS_Y`：左摇杆（左右/上下），`-32768..32767`
 - `ABS_RX` / `ABS_RY`：右摇杆（左右/上下），`-32768..32767`
-- `ABS_Z`（L2 刹车踏板）：独立轴，`-32768..32767`
-- `ABS_RZ`（R2 油门踏板）：独立轴，`-32768..32767`
+- `ABS_Z`（L2 刹车踏板）：独立轴，`0..32767`
+- `ABS_RZ`（R2 油门踏板）：独立轴，`0..32767`
+- 按钮：`BTN_TRIGGER` 到 `BTN_BASE6`，对应 DirectInput Button 1..12
 
 这样在 RBR 的 `Controller Setup` 界面：
 - **`Steering`**：按回车 → 拨动左摇杆左右 → 识别为 **X 轴**
 - **`Throttle`**：按回车 → 踩下 **R2** → 识别为 **RZ 轴**
 - **`Footbrake`**：按回车 → 踩下 **L2** → 识别为 **Z 轴**
+- **`Gear Up`**：按回车 → 按 **× 键** → 识别为 **Button 1**
+- **`Gear Down`**：按回车 → 按 **口 键** → 识别为 **Button 3**
 - **`Accelerate and Brake`（合并轴）**：按 **DEL** 清空
 实现完美的左脚刹车与独立油门控制。
 
@@ -206,8 +210,8 @@ wineserver 一死，`explorer.exe / services.exe / rpcss.exe / plugplay.exe / ta
 ## 7. 命令速查
 
 ```bash
-# 输入侧：虚拟手柄（DirectInput 独立满行程踏板模式）+ 独占物理 DS5
-./bin/ds5vpad -dinput &
+# 输入侧：虚拟手柄（DirectInput 8 原生踏板与按键）+ 独占物理 DS5
+./bin/ds5vpad -proto dinput8 &
 
 # 输出侧：消费 NGP 遥测
 ./bin/ds5d -profile rbr -trace &

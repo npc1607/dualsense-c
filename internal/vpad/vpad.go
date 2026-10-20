@@ -6,25 +6,41 @@
 // wants to drive the triggers and voice coils then fights Steam for the device.
 // ds5vpad inverts that: it builds the virtual pad itself, grabs the physical
 // controller exclusively, and forwards input. Steam Input can stay off, the game
-// still sees a normal Xbox pad, and nothing else writes to the controller.
+// still sees a normal pad, and nothing else writes to the controller.
 //
-// It is also the only place a game's force-feedback requests can be observed:
-// the game (or Proton's XInput translation) sends them to the virtual device.
+// Supported protocol families:
+//   - XInput (Xbox 360, 045e:028e): modern PC games, standard Steam/Proton layout.
+//   - DirectInput 8 (Logitech Dual Action, 046d:c216): classic pre-XInput (2000s era)
+//     racing and action games like Richard Burns Rally, with independent analog
+//     pedal axes and discrete DirectInput buttons.
 //
 // Platform support:
-//   - Linux: implemented with /dev/uinput (see vpad_linux.go).
-//   - Windows: not implemented yet; the intended path is a ViGEm-style virtual
-//     bus driver, which reports rumble callbacks natively. See vpad_windows.go.
+//   - Linux: implemented via /dev/uinput.
+//   - Windows: planned ViGEmBus (XInput) and vJoy / ViGEm DS4 (DirectInput 8).
 package vpad
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"time"
 )
 
 // ErrUnsupported is returned on platforms without a virtual-pad backend yet.
 var ErrUnsupported = errors.New("vpad: virtual gamepad backend not available on this platform")
+
+// Protocol selects the hardware protocol simulated by the virtual pad.
+type Protocol string
+
+const (
+	// ProtocolXInput simulates a wired Xbox 360 pad (045e:028e), standard for modern games.
+	ProtocolXInput Protocol = "xinput"
+
+	// ProtocolDInput8 simulates a classic DirectInput 8 gamepad (Logitech Dual Action 046d:c216),
+	// featuring independent unipolar pedal axes (L2 brake, R2 throttle) and discrete DInput buttons.
+	ProtocolDInput8 Protocol = "dinput8"
+)
 
 // Rumble is a force-feedback state reported by the game, 0..255 per motor.
 type Rumble struct {
@@ -34,35 +50,53 @@ type Rumble struct {
 	At time.Time
 }
 
-// RumbleSource is where captured force-feedback is published. Every backend
+// RumbleSink is where captured force-feedback is published. Every backend
 // calls it whenever the game changes the rumble state, so a future Windows
 // backend only has to feed the same channel.
 type RumbleSink func(Rumble)
 
 // Config describes the virtual pad.
 type Config struct {
-	// Name is the device name the game sees.
+	// Protocol selects the virtual gamepad protocol (xinput or dinput8).
+	Protocol Protocol
+
+	// Name is the device name the game sees. If empty, the protocol's default is used.
 	Name string
-	// Vendor/Product identify the pad. 045e:028e is the wired Xbox 360 pad,
-	// which every SDL/Wine build already has a mapping for.
+
+	// Vendor/Product identify the pad. If zero, the protocol's default is used.
 	Vendor, Product uint16
+
 	// GrabPath forces a specific physical evdev node to forward. Empty means
 	// auto-detect the first DualSense gamepad.
 	GrabPath string
-	// PlayerLEDs, Deadzone are optional tuning knobs for the input mapping.
+
+	// Deadzone is an optional tuning knob for the input mapping.
 	Deadzone float32
+
 	// Logger receives diagnostics.
 	Logger interface {
 		Printf(format string, args ...any)
 	}
 }
 
-// DefaultConfig returns the Xbox 360 identity plus auto-detection.
+// DefaultConfig returns the default XInput (Xbox 360) identity.
 func DefaultConfig() Config {
 	return Config{
+		Protocol: ProtocolXInput,
 		Name:     "ds5vpad virtual pad",
 		Vendor:   0x045e,
 		Product:  0x028e,
+		Deadzone: 0.02,
+	}
+}
+
+// DInput8Config returns a classic DirectInput 8 identity (Logitech Dual Action).
+func DInput8Config() Config {
+	return Config{
+		Protocol: ProtocolDInput8,
+		Name:     "Logitech Dual Action (DInput8)",
+		Vendor:   0x046d,
+		Product:  0xc216,
 		Deadzone: 0.02,
 	}
 }
@@ -75,4 +109,36 @@ type Pad interface {
 	Run(ctx context.Context) error
 	// Close destroys the virtual device.
 	Close() error
+}
+
+// Backend creates a Pad instance for a specific protocol.
+type Backend func(cfg Config, sink RumbleSink) (Pad, error)
+
+var (
+	registryMu sync.RWMutex
+	registry   = map[Protocol]Backend{}
+)
+
+// Register makes a virtual pad protocol backend available.
+func Register(proto Protocol, b Backend) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, dup := registry[proto]; dup {
+		panic("vpad: duplicate registration for protocol " + string(proto))
+	}
+	registry[proto] = b
+}
+
+// Open builds the virtual pad using the backend registered for cfg.Protocol.
+func Open(cfg Config, sink RumbleSink) (Pad, error) {
+	if cfg.Protocol == "" {
+		cfg.Protocol = ProtocolXInput
+	}
+	registryMu.RLock()
+	b, ok := registry[cfg.Protocol]
+	registryMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("vpad: unsupported protocol %q (did you blank-import vpad/all?)", cfg.Protocol)
+	}
+	return b(cfg, sink)
 }

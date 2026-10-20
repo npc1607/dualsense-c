@@ -24,13 +24,15 @@ import (
 
 	"github.com/npc1607/dualsense-c/internal/source/ffb"
 	"github.com/npc1607/dualsense-c/internal/vpad"
+	_ "github.com/npc1607/dualsense-c/internal/vpad/all"
 )
 
 var version = "dev"
 
 func main() {
 	var (
-		name    = flag.String("name", "ds5vpad virtual pad", "virtual device name the game will see")
+		proto   = flag.String("proto", string(vpad.ProtocolXInput), "virtual pad protocol: xinput (default, Xbox 360) or dinput8 (Logitech Dual Action DirectInput 8)")
+		name    = flag.String("name", "", "virtual device name (default: auto per protocol)")
 		grab    = flag.String("grab", "", "physical evdev node to grab (default: auto-detect DualSense)")
 		publish = flag.String("publish", ffb.DefaultListen, "UDP address to publish rumble to")
 		hz      = flag.Int("hz", 60, "rumble publish rate")
@@ -90,8 +92,18 @@ func main() {
 		}
 	}()
 
-	cfg := vpad.DefaultConfig()
-	cfg.Name = *name
+	var cfg vpad.Config
+	switch vpad.Protocol(*proto) {
+	case vpad.ProtocolDInput8:
+		cfg = vpad.DInput8Config()
+	case vpad.ProtocolXInput:
+		cfg = vpad.DefaultConfig()
+	default:
+		logger.Fatalf("unknown -proto %q (supported: xinput, dinput8)", *proto)
+	}
+	if *name != "" {
+		cfg.Name = *name
+	}
 	cfg.GrabPath = *grab
 	cfg.Logger = logger
 

@@ -205,6 +205,7 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 | BeamNG.drive | UDP **4444**（选项 → 其他 → 启用 OutGauge） | `outgauge` | [支持] 内置 |
 | Live for Speed | UDP **4444**（选项 → 外设 → OutGauge） | `outgauge` | [支持] 内置 |
 | DiRT Rally 2.0 / EA Sports WRC / DiRT 4 | UDP **20777**（配置 → 启用 UDP 遥测） | `dirt` + `fields` | [模板] 需字段校准（各版本结构差异较大，需使用 `sniff` 校准） |
+| 理查德·伯恩斯拉力赛（RBR / RSF，NGP 插件） | UDP **6776**（Plugins → NGP 按 `U` 打开 UDP 遥测） | `fields` | [支持] 内置（`rbr`，按 NGP `TelemetryData.h` 的 664 字节布局） |
 | F1 22 / 23 / 24 | UDP **20777** | `fields` | [模板] 需字段校准（按年份版本校准字段偏移） |
 | Assetto Corsa / ACC / AC Rally | 共享内存 `acpmf_physics` → `ds5bridge.exe` → UDP **9999** | `acshm` | [支持] 内置（采用实测偏移定义） |
 | rFactor 2 / LMU、ETS2 / ATS | 共享内存 | — | [规划中] |
@@ -309,7 +310,8 @@ Uinput 虚拟 Xbox 360 手柄 + 独占物理手柄，把手柄输入转发给游
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
-| `-name` | `ds5vpad virtual pad` | 游戏看到的设备名 |
+| `-proto` | `xinput` | 虚拟手柄协议：`xinput`（Xbox 360，现代标准）或 `dinput8`（罗技 Dual Action 6轴12键，适用 RBR 等 2000s 经典游戏） |
+| `-name` | 协议默认名 | 游戏看到的设备名（缺省由协议自动决定） |
 | `-grab` | 自动识别 | 要独占的物理 evdev 节点 |
 | `-publish` | `127.0.0.1:9998` | 力反馈发布地址 |
 | `-hz` | `60` | 发布频率 |

@@ -9,17 +9,28 @@ acr.exe (Proton) ──写──► acpmf_physics
 ds5bridge.exe (同前缀) ──读────┘ ──UDP 127.0.0.1:9999──► ds5d ──► 手柄
 ```
 
-## 一键启停
+## 两段式启停（推荐）
+
+由于 Proton 容器机制，如果在游戏启动前就通过 `protontricks` 拉起桥，会导致 Proton 前缀被提前锁定，进而导致 Steam 无法正常拉起游戏。因此采用**两段式启动**：
 
 ```bash
-./scripts/ds5-acr.sh start           # AppID 默认 3917090 (AC Rally)
-./scripts/ds5-acr.sh status          # 进程 / signals / 桥是否卡住
-./scripts/ds5-acr.sh stop            # 全部停掉，手柄交还 Steam
-./scripts/ds5-acr.sh bridge-restart  # 桥卡死时只重启桥
-./scripts/ds5-acr.sh logs            # 同时 tail 两个日志
+# 第 1 步：启动 Linux 原生触感守护进程（加载 assetto-corsa profile 并接管手柄）
+./scripts/ds5-acr.sh start
 
-# 覆盖默认值
-DS5_APPID=805550 DS5_RATE=250 ./scripts/ds5-acr.sh start   # ACC
+# 第 2 步：打开 Steam 正常启动 Assetto Corsa Rally (ACR) 并进入赛道
+
+# 第 3 步：游戏运行后，在终端一键注入共享内存桥
+./scripts/ds5-acr.sh bridge
+
+# 或者直接使用全自动侦测模式（启动 ds5d 并在后台自动等待游戏启动后注入桥）：
+./scripts/ds5-acr.sh auto
+```
+
+常用命令：
+```bash
+./scripts/ds5-acr.sh status          # 查看进程状态、游戏运行状态与当前信号
+./scripts/ds5-acr.sh stop            # 干净停止全部服务并释放手柄
+./scripts/ds5-acr.sh logs            # 同时实时查看 ds5d 与桥的追踪日志
 ```
 
 AppID：AC `244210` · ACC `805550` · AC Rally `3917090`

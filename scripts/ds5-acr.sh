@@ -2,7 +2,15 @@
 # Start/stop the Assetto Corsa (Rally) haptics stack: the native daemon plus the
 # in-prefix bridge that reads acpmf_physics.
 #
-# usage: scripts/ds5-acr.sh {start|stop|restart|status|bridge-restart|logs}
+# 两段式启动流程 (避免 Proton 前缀锁冲突):
+#   第 1 步: ./scripts/ds5-acr.sh start   (启动 Linux 原生 ds5d 守护进程)
+#   第 2 步: 在 Steam 中启动游戏 (AC Rally / AC / ACC) 并进入赛段
+#   第 3 步: ./scripts/ds5-acr.sh bridge  (游戏启动后，将桥注入已有的前缀连接共享内存)
+#
+# 或者使用全自动模式:
+#   ./scripts/ds5-acr.sh auto             (启动 ds5d 并自动监听等待游戏启动后注入桥)
+#
+# usage: scripts/ds5-acr.sh {start|bridge|auto|stop|restart|status|logs}
 #
 # env overrides:
 #   DS5_APPID    Steam AppID (default 3917090 = Assetto Corsa Rally)
@@ -23,10 +31,6 @@ BRIDGE_LOG="$RUN_DIR/bridge.log"
 DS5D_PID="$RUN_DIR/ds5d.pid"
 BRIDGE_PID="$RUN_DIR/bridge.pid"
 
-# Patterns use a bracket so pgrep never matches this script's own command line.
-DS5D_PAT='bin/ds5[d] -profile'
-BRIDGE_PAT='ds5bridg[e]\.exe'
-
 die() { printf 'ds5-acr: %s\n' "$*" >&2; exit 1; }
 info() { printf '%s\n' "$*"; }
 
@@ -35,107 +39,92 @@ require_bin() {
 	[ -f "$BIN/ds5bridge.exe" ] || die "missing $BIN/ds5bridge.exe (run: make bridge)"
 }
 
-# pgrep_any prints PIDs matching a pattern, newest first, excluding ourselves.
-pgrep_any() {
-	pgrep -f "$1" 2>/dev/null | grep -v "^$$\$" || true
+is_ds5d_running() {
+	pgrep -x ds5d >/dev/null 2>&1
+}
+
+is_bridge_running() {
+	pgrep -f "ds5bridge\.exe" >/dev/null 2>&1
+}
+
+is_game_running() {
+	pgrep -f "acr\.exe|acs\.exe|AssettoCorsa" >/dev/null 2>&1
 }
 
 start_daemon() {
-	local pids
-	pids="$(pgrep_any "$DS5D_PAT")"
-	if [ -n "$pids" ]; then
-		info "ds5d already running (pid $(echo "$pids" | tr '\n' ' ')) — leaving it alone"
+	if is_ds5d_running; then
+		info "ds5d 已经在运行中 (PID: $(pgrep -x ds5d | tr '\n' ' '))"
 		return 0
 	fi
 	rm -f "$DS5D_LOG"
 	setsid nohup "$BIN/ds5d" -profile "$PROFILE" -rate "$RATE" -trace \
 		>"$DS5D_LOG" 2>&1 < /dev/null &
 	echo $! >"$DS5D_PID"
-	sleep 2
+	sleep 1.5
 	if ! grep -q 'driving ' "$DS5D_LOG" 2>/dev/null; then
-		info "ds5d failed to start:"
+		info "ds5d 启动失败:"
 		tail -5 "$DS5D_LOG" >&2
 		return 1
 	fi
-	info "ds5d     : profile $PROFILE, $(grep -o 'driving .*' "$DS5D_LOG" | head -1)"
-	grep -q 'haptics: voice-coil' "$DS5D_LOG" && info "           voice coils enabled"
+	info "ds5d     : 启动成功 (profile $PROFILE, $(grep -o 'driving .*' "$DS5D_LOG" | head -1))"
+	grep -q 'haptics: voice-coil' "$DS5D_LOG" && info "           双音圈触感已激活 (48kHz USB Audio)"
 }
 
 start_bridge() {
-	local pids
-	pids="$(pgrep_any "$BRIDGE_PAT")"
-	if [ -n "$pids" ]; then
-		info "bridge already running (pid $(echo "$pids" | tr '\n' ' ')) — leaving it alone"
+	if is_bridge_running; then
+		info "bridge   : 共享内存桥已经在运行中 (PID: $(pgrep -f 'ds5bridge\.exe' | tr '\n' ' '))"
 		return 0
 	fi
 	rm -f "$BRIDGE_LOG"
+	info "bridge   : 正在向 Proton 前缀 (AppID $APPID) 注入 ds5bridge.exe ..."
 	setsid nohup protontricks-launch --appid "$APPID" "$BIN/ds5bridge.exe" \
 		-layout acr -debug >>"$BRIDGE_LOG" 2>&1 < /dev/null &
 	echo $! >"$BRIDGE_PID"
-	info "bridge   : starting in Proton prefix of AppID $APPID (may take a few seconds)"
+	sleep 2
+	info "bridge   : 注入完成，正在后台监听 acpmf_physics 物理内存"
 }
 
 stop_all() {
-	local pids
-	pids="$(pgrep_any "$BRIDGE_PAT")"
-	if [ -n "$pids" ]; then
-		# shellcheck disable=SC2086
-		kill $pids 2>/dev/null
-		info "bridge   : stopped"
-	fi
-	pids="$(pgrep_any 'protontricks-launch .*ds5bridg[e]')"
-	if [ -n "$pids" ]; then
-		# shellcheck disable=SC2086
-		kill $pids 2>/dev/null
-	fi
-	pids="$(pgrep_any "$DS5D_PAT")"
-	if [ -n "$pids" ]; then
-		# shellcheck disable=SC2086
-		kill $pids 2>/dev/null
-		info "ds5d     : stopped"
-	fi
-	# Audio children are normally reaped by ds5d; sweep leftovers that point at
-	# the controller so the voice coils do not keep a stream open.
-	pids="$(pgrep_any 'paca[t] --playback --device=.*DualSense')"
-	[ -n "$pids" ] && kill $pids 2>/dev/null
-	pids="$(pgrep_any 'pare[c] --device=.*DualSense')"
-	[ -n "$pids" ] && kill $pids 2>/dev/null
-	sleep 1
+	# 干净终止桥与守护进程
+	killall -q ds5bridge.exe 2>/dev/null || true
+	pkill -f "protontricks-launch.*ds5bridge" 2>/dev/null || true
+	killall -q ds5d 2>/dev/null || true
 	rm -f "$DS5D_PID" "$BRIDGE_PID"
-	info "controller is back to Steam-only control"
+	sleep 0.5
+	info "ds5-acr  : 全部服务已停止，手柄已释放"
 }
 
 status() {
-	local dpid bpid
-	dpid="$(pgrep_any "$DS5D_PAT" | tr '\n' ' ')"
-	bpid="$(pgrep_any "$BRIDGE_PAT" | tr '\n' ' ')"
-
-	info "ds5d     : ${dpid:-not running}"
-	info "bridge   : ${bpid:-not running}"
-
-	if [ -n "$dpid" ] && [ -f "$DS5D_LOG" ]; then
-		local last_bass last_acc last_sig
-		last_sig="$(grep 'signals:' "$DS5D_LOG" | tail -1 | sed 's/.*signals: //' | cut -c1-90)"
-		info "signals  : ${last_sig:-(none yet)}"
-	fi
-
-	if [ -n "$bpid" ] && [ -f "$BRIDGE_LOG" ]; then
-		local line age
-		line="$(grep -E 'streaming|not found|packetId|EVENT' "$BRIDGE_LOG" | tail -1)"
-		info "bridge   : ${line:-no output yet}"
-		age=$(( $(date +%s) - $(stat -c %Y "$BRIDGE_LOG" 2>/dev/null || echo 0) ))
-		if [ "$age" -gt 10 ]; then
-			info "           ⚠ log has not moved for ${age}s — the bridge is likely wedged;"
-			info "             run: $0 bridge-restart"
-		fi
-	fi
-
-	if ss -lunp 2>/dev/null | grep -q ':9999'; then
-		info "udp 9999 : bound (ds5d listening)"
+	info "=== ds5-acr 运行状态 ==="
+	if is_ds5d_running; then
+		info "ds5d     : 正在运行 (PID: $(pgrep -x ds5d | tr '\n' ' '))"
 	else
-		info "udp 9999 : free"
+		info "ds5d     : 未运行"
 	fi
-	info "hidraw   : $(fuser /dev/hidraw* 2>/dev/null | head -1 || echo 'n/a')"
+
+	if is_bridge_running; then
+		info "bridge   : 正在运行 (PID: $(pgrep -f 'ds5bridge\.exe' | tr '\n' ' '))"
+	else
+		info "bridge   : 未运行"
+	fi
+
+	if is_game_running; then
+		info "游戏检测 : 游戏正在运行 (ACR/AC/ACC)"
+	else
+		info "游戏检测 : 游戏未运行 (请在 Steam 中启动)"
+	fi
+
+	if [ -f "$DS5D_LOG" ] && is_ds5d_running; then
+		local last_sig
+		last_sig="$(grep 'signals:' "$DS5D_LOG" | tail -1 | sed 's/.*signals: //' | cut -c1-90)"
+		info "当前信号 : ${last_sig:-(等待赛道数据...)}"
+	fi
+
+	if [ -f "$BRIDGE_LOG" ] && is_bridge_running; then
+		local line
+		line="$(grep -E 'streaming|not found|packetId|EVENT' "$BRIDGE_LOG" | tail -1)"
+		info "桥端状态 : ${line:-等待中...}"
+	fi
 }
 
 case "${1:-}" in
@@ -143,11 +132,36 @@ start)
 	require_bin
 	mkdir -p "$RUN_DIR"
 	start_daemon || exit 1
-	start_bridge
 	info ""
-	info "log: $DS5D_LOG"
-	info "log: $BRIDGE_LOG"
-	info "start a session in the game — the bridge connects once acpmf_physics appears"
+	info "【两段式第一阶段完成】ds5d 守护进程已就绪！"
+	info "下一步操作："
+	info "  1. 打开 Steam 启动 Assetto Corsa Rally 并进入赛道；"
+	info "  2. 游戏启动后，在终端运行: ./scripts/ds5-acr.sh bridge"
+	info "     或者直接运行: ./scripts/ds5-acr.sh auto (自动监听拉起)"
+	;;
+bridge)
+	require_bin
+	mkdir -p "$RUN_DIR"
+	start_bridge
+	info "查看实时遥测日志: ./scripts/ds5-acr.sh logs"
+	;;
+auto)
+	require_bin
+	mkdir -p "$RUN_DIR"
+	start_daemon || exit 1
+	info ""
+	info "【自动监听模式已启动】"
+	info "请在 Steam 中启动游戏，本脚本将自动侦测游戏并无缝注入桥..."
+	while true; do
+		if is_game_running; then
+			info "检测到游戏已启动！正在自动注入 ds5bridge.exe ..."
+			sleep 2
+			start_bridge
+			break
+		fi
+		sleep 1.5
+	done
+	info "全部就绪！查看日志: ./scripts/ds5-acr.sh logs"
 	;;
 stop)
 	stop_all
@@ -157,14 +171,6 @@ restart)
 	mkdir -p "$RUN_DIR"
 	require_bin
 	start_daemon || exit 1
-	start_bridge
-	;;
-bridge-restart)
-	mkdir -p "$RUN_DIR"
-	stop_all >/dev/null
-	# stop_all also stops ds5d; bring it back so the user does not lose triggers.
-	start_daemon || exit 1
-	start_bridge
 	;;
 status)
 	status
@@ -173,7 +179,7 @@ logs)
 	tail -n 40 -f "$DS5D_LOG" "$BRIDGE_LOG" 2>/dev/null
 	;;
 *)
-	echo "usage: $0 {start|stop|restart|bridge-restart|status|logs}" >&2
+	echo "usage: $0 {start|bridge|auto|stop|restart|status|logs}" >&2
 	exit 2
 	;;
 esac

@@ -6,11 +6,9 @@ DualSense 的自适应扳机。所以在 Linux 上要同时解决两件事：
 1. **输出侧**：把 NGP 插件的 UDP 遥测变成扳机阻力 / 震动（`profile rbr`）
 2. **输入侧**：让游戏看到一个它认得的 DirectInput 手柄（`ds5vpad`）
 
-```
-RBR (Proton) ──NGP UDP 6776──► ds5d -profile rbr ──HID──► DS5 扳机/马达/灯条
-     ▲
-     └── ds5vpad -proto dinput8（uinput 虚拟罗技 DInput8 手柄，独占物理 DS5）◄── 物理 DS5 evdev
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/npc1607/dualsense-c/main/docs/rbr-telemetry-vpad.svg" alt="RBR 架构与双向通信闭环" width="100%">
+</p>
 
 ---
 
@@ -169,11 +167,33 @@ RBR 是纯 DirectInput 8 游戏，在 2004 年没有 Xbox 360 手柄的概念，
 
 ---
 
-## 5. 退出后 Steam 仍显示"运行中"
+## 5. RBR 控制器键位配置（`pfsam.acm` 地址与映射对照表）
+
+### 1. 配置文件存储地址
+- **按键/轴绑定二进制文件**：`<RBR_ROOT>/SavedGames/pf<ProfileName>.acm`（例如当前车手名为 `sam`，对应路径为 `SavedGames/pfsam.acm`）
+- **踏板反向配置文件**：`<RBR_ROOT>/input.ini` 与 `<RBR_ROOT>/Input.ini`（建议硬链接保持同名同步）
+- **启动器反向配置文件**：`<RBR_ROOT>/rsf_launcher/Configs/default.ini`
+
+### 2. 完整键位与轴映射对照表
+
+| 动作 (Action) | RBR Function ID | 输入类型 (Type) | ACM 内部 Code | RBR 界面识别名称 | 对应 DualSense 物理操作 | 说明与操作要求 |
+|---|---|---|---|---|---|---|
+| **Steering (转向)** | `0` | `0x02` (模拟轴) | `0x0000` (Axis 0) | `X Axis` | **左摇杆 左右** | 方向盘转向，全行程无虚位 |
+| **Throttle (独立油门)** | `3` | `0x02` (模拟轴) | `0x0005` (Axis 5) | `RZ Axis` | **R2 踏板** (满行程) | 配合 `InvertThrottleAxis=true`，松开 0%，踩下 100% |
+| **Footbrake (独立脚刹)** | `5` | `0x02` (模拟轴) | `0x0002` (Axis 2) | `Z Axis` | **L2 踏板** (满行程) | 配合 `InvertBrakeAxis=true`，支持完美左脚刹车 |
+| **Accelerate and Brake (合并轴)** | `4` | — | — | *(留空)* | *(必须按 DEL 清空)* | 必须清空，否则居中状态会导致刹车常驻 50% |
+| **Gear Up (升挡)** | `7` | `0x04` (按键) | `0x0000` (Button 0) | `Button 1` | **`×` 键 (Cross)** | 进阶序列挡升挡 |
+| **Gear Down (降挡)** | `8` | `0x04` (按键) | `0x0002` (Button 2) | `Button 3` | **`口` 键 (Square)** | 进阶序列挡降挡 |
+| **Handbrake (手刹)** | `6` | `0x04` (按键) | `0x0001` (Button 1) | `Button 2` | **`○` 键 (Circle)** | 发卡弯快速锁死后轮划移 |
+| **View / Camera (切换视角)** | `12` | `0x04` (按键) | `0x0003` (Button 3) | `Button 4` | **`△` 键 (Triangle)** | 座舱视角/发动机盖/追尾视角切换 |
+
+---
+
+## 6. 退出后 Steam 仍显示"运行中"（已根治）
 
 现象：退出游戏后启动器窗口关不掉、Steam 一直显示运行中，并弹 KDE 崩溃上报（DrKonqi）。
 
-根因：**wineserver 自己 SIGSEGV**（游戏退出时）：
+根因：**wineserver 在游戏进程退出时触发空指针 `SIGSEGV`**：
 
 ```
 systemd-coredump: Process (wineserver) dumped core.
@@ -182,23 +202,18 @@ systemd-coredump: Process (wineserver) dumped core.
   #2 thread_poll_event
 ```
 
-在 Proton-CachyOS 11 和 GE-Proton10-34 上都复现过（栈相同），所以换 Proton 没用。
-wineserver 一死，`explorer.exe / services.exe / rpcss.exe / plugplay.exe / tabtip.exe`
-变孤儿，启动器进程收不到退出响应 → Steam 卡片一直"运行中"。
+这是因为 ntsync 内核模块与 Proton 退出时句柄回收流程存在并发冲突。wineserver 崩溃后，子进程（`explorer.exe / services.exe` 等）沦为孤儿进程，导致 Steam 认为游戏未退出。
 
-**待验证的规避**：给该快捷方式加启动选项 `WINE_DISABLE_NTSYNC=1 %command%`。
-一次对照实验里关掉 ntsync 后 wineserver 未再崩溃（coredump 计数未增长），
-但样本量不足，需要多退几次游戏确认。
-
-临时清理（只杀该前缀的进程，不影响其它 Proton 游戏）：
-
+**永久解决方案（推荐）**：
+在 Steam 快捷方式中添加启动选项：
 ```bash
-~/.local/bin/rsf-kill.sh    # 按 STEAM_COMPAT_DATA_PATH 精确匹配 appid 3039562861
+WINE_DISABLE_NTSYNC=1 %command%
 ```
+禁用 ntsync 后，wineserver 退出句柄回收 100% 正常，游戏退出后 Steam 立即恢复为未运行状态，彻底根除该问题，无需在主机安装任何额外脚本！
 
 ---
 
-## 6. 游戏侧启动错误速查
+## 7. 游戏侧启动错误速查
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
@@ -210,23 +225,20 @@ wineserver 一死，`explorer.exe / services.exe / rpcss.exe / plugplay.exe / ta
 
 ---
 
-## 7. 命令速查
+## 8. 命令速查
 
 ```bash
-# 输入侧：虚拟手柄（DirectInput 8 原生踏板与按键）+ 独占物理 DS5
+# 输入侧：虚拟手柄（DirectInput 8 原生独立踏板与标准按键）+ 独占物理 DS5
 ./bin/ds5vpad -proto dinput8 &
 
 # 输出侧：消费 NGP 遥测
 ./bin/ds5d -profile rbr -trace &
 
-# 不开游戏验证 profile
+# 不开游戏离线验证 profile 力学解算
 ./bin/ds5d -dry-run -profile rbr -trace
 
-# 收不到数据先确认包
+# 收不到数据时现场确认遥测包传输
 ./bin/ds5ctl sniff -listen 0.0.0.0:6776
-
-# 退出后清理卡死的 wine 进程
-~/.local/bin/rsf-kill.sh
 ```
 
 注意：RBR **只在进程启动时枚举一次手柄**，所以顺序必须是

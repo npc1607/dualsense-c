@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 720" width="100%" height="100%">
+  <defs>
+    <filter id="shadow" x="-3%" y="-3%" width="106%" height="106%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.06"/>
+    </filter>
+    <filter id="glow-blue" x="-4%" y="-4%" width="108%" height="108%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#2563eb" flood-opacity="0.12"/>
+    </filter>
+    <filter id="glow-green" x="-4%" y="-4%" width="108%" height="108%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#16a34a" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow-blue" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#2563eb" />
+    </marker>
+    <marker id="arrow-green" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#16a34a" />
+    </marker>
+    <marker id="arrow-orange" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#ea580c" />
+    </marker>
+    <marker id="arrow-purple" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#7c3aed" />
+    </marker>
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; font-weight: 800; fill: #0f172a; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 500; fill: #475569; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 16.5px; }
+      .card-sub { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; fill: #64748b; }
+      .card-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13px; fill: #1e293b; }
+      .tag-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 12px; font-weight: 600; text-anchor: middle; }
+      .code-tag { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; fill: #334155; }
+    </style>
+  </defs>
+
+  <!-- 背景画布 -->
+  <rect width="100%" height="100%" fill="#f8fafc" rx="16"/>
+
+  <!-- 顶部主副标题 -->
+  <g transform="translate(590, 45)" text-anchor="middle">
+    <text class="title" font-size="26" y="0">RBR (理查德·伯恩斯拉力赛) 架构与双向通信闭环</text>
+    <text class="subtitle" font-size="14.5" y="28">DirectInput 8 独立踏板输入注入 ＋ NGP 664 字节高拟真力学遥测闭环输出</text>
+  </g>
+
+  <!-- ================= 上半部：输出动力学遥测环 (Output Feedback Loop) ================= -->
+  
+  <!-- 节点 1: RBR 游戏本体 -->
+  <g transform="translate(50, 115)" filter="url(#shadow)">
+    <rect width="250" height="235" rx="12" fill="#ffffff" stroke="#2563eb" stroke-width="2.2"/>
+    <rect x="0" y="0" width="250" height="38" rx="12" fill="#eff6ff"/>
+    <text class="card-title" x="16" y="25" fill="#1e40af">RBR (RSF / Proton)</text>
+    <text class="card-sub" x="16" y="58">richardburnsrally_sse.exe</text>
+    <line x1="16" y1="70" x2="234" y2="70" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4,4"/>
+    <g class="card-body" transform="translate(16, 94)">
+      <text y="0">• NGP 物理引擎高频计算 (120Hz)</text>
+      <text y="24">• 四轮独立避震活塞速度采样</text>
+      <text y="48">• 悬挂弹簧压缩量 &amp; 刹车盘温度</text>
+      <text y="72">• 车体纵/横/垂向与横摆角加速度</text>
+      <text y="96" fill="#2563eb" font-weight="600">→ 原生 UDP 6776 遥测广播</text>
+    </g>
+  </g>
+
+  <!-- 连接线 1: RBR -> ds5d (UDP 6776) -->
+  <path d="M 300 230 L 460 230" fill="none" stroke="#2563eb" stroke-width="3" stroke-dasharray="6,4" marker-end="url(#arrow-blue)"/>
+  <g transform="translate(380, 212)">
+    <rect x="-70" y="-14" width="140" height="24" rx="6" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+    <text class="tag-text" y="3" fill="#1d4ed8">NGP UDP 6776 (664B)</text>
+  </g>
+
+  <!-- 节点 2: ds5d 守护进程 -->
+  <g transform="translate(465, 115)" filter="url(#glow-blue)">
+    <rect width="260" height="235" rx="12" fill="#ffffff" stroke="#2563eb" stroke-width="2.2"/>
+    <rect x="0" y="0" width="260" height="38" rx="12" fill="#eff6ff"/>
+    <text class="card-title" x="16" y="25" fill="#1e40af">ds5d 触感中枢 (profile rbr)</text>
+    <text class="card-sub" x="16" y="58">0.0.0.0:6776 (Fields 解码器)</text>
+    <line x1="16" y1="70" x2="244" y2="70" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4,4"/>
+    <g class="card-body" transform="translate(16, 94)">
+      <text y="0">• L2 无助力液压刹车阻尼刚度曲线</text>
+      <text y="24">• R2 渐进油门弹簧 + 8000rpm 红线微颤</text>
+      <text y="48">• 52Hz/40Hz 双音圈砂石拍频纹理</text>
+      <text y="72">• 斯堪的纳维亚钟摆 (32Hz 甩尾脉冲)</text>
+      <text y="96">• 飞坡落地防触底重锤 (16Hz/22Hz)</text>
+      <text y="120" fill="#16a34a" font-weight="600">→ 125Hz HID 报告 ＋ 48kHz PCM</text>
+    </g>
+  </g>
+
+  <!-- 连接线 2: ds5d -> DualSense -->
+  <path d="M 725 230 L 880 230" fill="none" stroke="#2563eb" stroke-width="3" marker-end="url(#arrow-blue)"/>
+  <g transform="translate(802, 212)">
+    <rect x="-65" y="-14" width="130" height="24" rx="6" fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+    <text class="tag-text" y="3" fill="#1d4ed8">/dev/hidraw6 (HID)</text>
+  </g>
+
+  <!-- 节点 3: 物理 DualSense 手柄 (右侧跨越中枢) -->
+  <g transform="translate(885, 115)" filter="url(#shadow)">
+    <rect width="245" height="535" rx="14" fill="#ffffff" stroke="#334155" stroke-width="2.5"/>
+    <rect x="0" y="0" width="245" height="42" rx="14" fill="#f1f5f9"/>
+    <text class="card-title" x="16" y="27" fill="#0f172a">物理 DualSense 手柄</text>
+    <text class="card-sub" x="16" y="62">VID: 054C, PID: 0CE6</text>
+    <line x1="16" y1="74" x2="229" y2="74" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4,4"/>
+
+    <!-- 顶部输出硬件 -->
+    <g class="card-body" transform="translate(16, 96)">
+      <text y="0" font-weight="700" fill="#2563eb">【触感执行单元 Output】</text>
+      <text y="24">• L2: 自适应阻尼器 (刚性液压墙)</text>
+      <text y="46">• R2: 自适应阻尼器 (渐进弹簧)</text>
+      <text y="68">• 双音圈马达 (Ch3/4 音频直推)</text>
+      <text y="90">• 左右大/小偏心转子马达 (HID)</text>
+      <text y="112">• RGB 电竞动态转速灯条</text>
+    </g>
+
+    <line x1="16" y1="240" x2="229" y2="240" stroke="#cbd5e1" stroke-width="1.5"/>
+
+    <!-- 底部输入硬件 -->
+    <g class="card-body" transform="translate(16, 266)">
+      <text y="0" font-weight="700" fill="#16a34a">【物理输入采集 Input】</text>
+      <text y="24">• 左摇杆 (X/Y 方向转向)</text>
+      <text y="48">• 右摇杆 (RX/RY 辅助轴)</text>
+      <text y="72">• L2 / R2 霍尔模拟油门刹车踏板</text>
+      <text y="96">• 动作键 (×/○/□/△ 离散按钮)</text>
+      <text y="120">• 肩键 (L1/R1) &amp; Options/Share</text>
+      <text y="150" fill="#ea580c" font-weight="600">→ /dev/input/event12</text>
+      <text y="172" fill="#ea580c" font-weight="600">（由 ds5vpad EVIOCGRAB 独占）</text>
+    </g>
+  </g>
+
+  <!-- ================= 下半部：输入正向流 (Input Forwarding Loop) ================= -->
+
+  <!-- 连接线 3: 物理手柄 -> ds5vpad (独占获取) -->
+  <path d="M 885 520 L 730 520" fill="none" stroke="#ea580c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <g transform="translate(805, 502)">
+    <rect x="-65" y="-14" width="130" height="24" rx="6" fill="#fff7ed" stroke="#fed7aa" stroke-width="1"/>
+    <text class="tag-text" y="3" fill="#c2410c">独占物理 evdev</text>
+  </g>
+
+  <!-- 节点 4: ds5vpad 虚拟手柄后端 -->
+  <g transform="translate(465, 415)" filter="url(#glow-green)">
+    <rect width="260" height="235" rx="12" fill="#ffffff" stroke="#16a34a" stroke-width="2.2"/>
+    <rect x="0" y="0" width="260" height="38" rx="12" fill="#f0fdf4"/>
+    <text class="card-title" x="16" y="25" fill="#166534">ds5vpad (-proto dinput8)</text>
+    <text class="card-sub" x="16" y="58">罗技 Dual Action 架构 (046d:c216)</text>
+    <line x1="16" y1="70" x2="244" y2="70" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4,4"/>
+    <g class="card-body" transform="translate(16, 94)">
+      <text y="0">• 独立满行程 Z 轴 (L2 刹车踏板)</text>
+      <text y="24">• 独立满行程 RZ 轴 (R2 油门踏板)</text>
+      <text y="48">• 左摇杆 X/Y 轴 &amp; 右摇杆 RX/RY 轴</text>
+      <text y="72">• BTN_GAMEPAD 标准按键 1..10 映射</text>
+      <text y="96">• 抑制数字扳机防键位冲突</text>
+      <text y="120" fill="#16a34a" font-weight="600">→ uinput 暴露 /dev/input/event30</text>
+    </g>
+  </g>
+
+  <!-- 连接线 4: ds5vpad -> RBR Proton DirectInput 8 -->
+  <path d="M 465 520 L 305 520" fill="none" stroke="#16a34a" stroke-width="3" marker-end="url(#arrow-green)"/>
+  <g transform="translate(385, 502)">
+    <rect x="-70" y="-14" width="140" height="24" rx="6" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+    <text class="tag-text" y="3" fill="#15803d">DirectInput 8 协议</text>
+  </g>
+
+  <!-- 节点 5: RBR 游戏输入映射与配置文件 -->
+  <g transform="translate(50, 415)" filter="url(#shadow)">
+    <rect width="250" height="235" rx="12" fill="#ffffff" stroke="#16a34a" stroke-width="2.2"/>
+    <rect x="0" y="0" width="250" height="38" rx="12" fill="#f0fdf4"/>
+    <text class="card-title" x="16" y="25" fill="#166534">RBR 输入映射与固化</text>
+    <text class="card-sub" x="16" y="58">SavedGames/pfsam.acm (权限 666)</text>
+    <line x1="16" y1="70" x2="234" y2="70" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4,4"/>
+    <g class="card-body" transform="translate(16, 94)">
+      <text y="0">• Steering: X 轴 (左摇杆左右)</text>
+      <text y="24">• Throttle: RZ 轴 (Invert=true)</text>
+      <text y="48">• Footbrake: Z 轴 (Invert=true)</text>
+      <text y="72">• Gear Up: Button 1 (× 键)</text>
+      <text y="96">• Gear Down: Button 3 (□ 键)</text>
+      <text y="120">• Handbrake: Button 2 (○ 键)</text>
+    </g>
+  </g>
+
+  <!-- 向上连接线: 节点 5 驱动 节点 1 车辆物理 -->
+  <path d="M 175 415 L 175 355" fill="none" stroke="#16a34a" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <g transform="translate(175, 385)">
+    <rect x="-45" y="-12" width="90" height="22" rx="5" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+    <text class="tag-text" y="3" fill="#15803d">操控注入</text>
+  </g>
+
+</svg>

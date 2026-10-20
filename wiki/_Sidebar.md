@@ -7,6 +7,7 @@
 - [扳机效果](Triggers)
 - [HD 触感（音圈）](HD-Haptics)
 - [音频 AI](Audio-AI)
+- [赛车电台与情境广播 (Radio Agent)](Radio-Agent-Architecture)
 - [力反馈镜像](FFB-and-Virtual-Pad)
 - [AC / ACC / AC Rally](ACR-AC-ACC)
 - [直驱模拟器 FFB (AC/ACR)](Direct-Drive-FFB)

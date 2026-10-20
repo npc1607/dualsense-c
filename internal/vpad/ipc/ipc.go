@@ -30,7 +30,10 @@ import (
 // Magic identifies an FFB protocol frame ("FFB1").
 const Magic uint32 = 0x31424646
 
-// FrameSize is the 12-byte wire format:
+// MagicSig identifies a telemetry signal frame ("SIG1").
+const MagicSig uint32 = 0x31474953
+
+// FrameSize is the 12-byte wire format for FFB1:
 //
 //	0..3:  Magic ("FFB1", little endian uint32 0x31424646)
 //	4:     Left motor magnitude (0..255)

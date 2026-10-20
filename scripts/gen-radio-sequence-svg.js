@@ -1,0 +1,176 @@
+const fs = require('fs');
+const path = require('path');
+
+const width = 1100;
+const height = 750;
+
+const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" height="100%">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <linearGradient id="grad-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="grad-amber" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <linearGradient id="grad-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#6d28d9"/>
+    </linearGradient>
+    <linearGradient id="grad-green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#475569" />
+    </marker>
+    <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#2563eb" />
+    </marker>
+    <marker id="arrow-amber" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#d97706" />
+    </marker>
+    <marker id="arrow-purple" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#7c3aed" />
+    </marker>
+    <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#059669" />
+    </marker>
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 800; font-size: 22px; fill: #0f172a; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13px; fill: #64748b; }
+      .actor-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 13px; fill: #ffffff; text-anchor: middle; }
+      .actor-sub { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; fill: #e2e8f0; text-anchor: middle; }
+      .msg-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 11px; font-weight: 600; fill: #334155; }
+      .msg-note { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; fill: #64748b; }
+      .box-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 11px; font-weight: 700; fill: #0f172a; }
+      .timeline { stroke: #cbd5e1; stroke-width: 1.5; stroke-dasharray: 4,4; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="${width}" height="${height}" fill="#f8fafc"/>
+
+  <!-- Title -->
+  <g transform="translate(60, 45)">
+    <text class="title" x="0" y="0">DualSense 赛车电台端到端时序协作图 (Sequence Diagram)</text>
+    <text class="subtitle" x="0" y="24">遥测提取 → IPC SIG1 极速广播 → 滑动窗口与 AI 分类 → PTT 电台 DSP 滤波 → 双声道正交输出</text>
+  </g>
+
+  <!-- ================= Actor Headers ================= -->
+  <!-- Actor 1: Game Process (x = 100) -->
+  <g transform="translate(40, 95)" filter="url(#shadow)">
+    <rect width="140" height="48" rx="8" fill="url(#grad-blue)"/>
+    <text class="actor-title" x="70" y="22">赛车游戏进程</text>
+    <text class="actor-sub" x="70" y="38">ACR / RBR / Steam</text>
+  </g>
+  <line class="timeline" x1="110" y1="143" x2="110" y2="700"/>
+
+  <!-- Actor 2: ds5d Signal Core (x = 300) -->
+  <g transform="translate(230, 95)" filter="url(#shadow)">
+    <rect width="160" height="48" rx="8" fill="url(#grad-blue)"/>
+    <text class="actor-title" x="80" y="22">ds5d 核心守护进程</text>
+    <text class="actor-sub" x="80" y="38">Signal Set &amp; Rules</text>
+  </g>
+  <line class="timeline" x1="310" y1="143" x2="310" y2="700"/>
+
+  <!-- Actor 3: IPC Event Bus (x = 510) -->
+  <g transform="translate(440, 95)" filter="url(#shadow)">
+    <rect width="160" height="48" rx="8" fill="url(#grad-amber)"/>
+    <text class="actor-title" x="80" y="22">internal/vpad/ipc</text>
+    <text class="actor-sub" x="80" y="38">SIG1 遥测广播总线</text>
+  </g>
+  <line class="timeline" x1="520" y1="143" x2="520" y2="700"/>
+
+  <!-- Actor 4: Radio AI Classifier (x = 720) -->
+  <g transform="translate(640, 95)" filter="url(#shadow)">
+    <rect width="170" height="48" rx="8" fill="url(#grad-purple)"/>
+    <text class="actor-title" x="85" y="22">ds5radio / AI 推理</text>
+    <text class="actor-sub" x="85" y="38">Rule / LLM Classifier</text>
+  </g>
+  <line class="timeline" x1="725" y1="143" x2="725" y2="700"/>
+
+  <!-- Actor 5: DualSense Hardware (x = 940) -->
+  <g transform="translate(850, 95)" filter="url(#shadow)">
+    <rect width="180" height="48" rx="8" fill="url(#grad-green)"/>
+    <text class="actor-title" x="90" y="22">DualSense 物理手柄</text>
+    <text class="actor-sub" x="90" y="38">Ch1/2 扬声器 ＋ Ch3/4 音圈</text>
+  </g>
+  <line class="timeline" x1="940" y1="143" x2="940" y2="700"/>
+
+  <!-- ================= Sequence Steps ================= -->
+
+  <!-- Step 1: Telemetry Stream -->
+  <g transform="translate(0, 175)">
+    <line x1="110" y1="0" x2="304" y2="0" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+    <text class="msg-text" x="125" y="-6">1. 共享内存 / UDP 原始遥测帧 (60Hz)</text>
+    <text class="msg-note" x="125" y="14">acpmf_physics: speed, rpm, slip, accel_g</text>
+  </g>
+
+  <!-- Step 2: Signal Hub Processing & Dual Branch -->
+  <g transform="translate(310, 215)">
+    <!-- Activation Bar on ds5d -->
+    <rect x="-6" y="0" width="12" height="75" rx="3" fill="#93c5fd"/>
+
+    <!-- Path A: Direct to Haptics -->
+    <line x1="6" y1="15" x2="624" y2="15" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arrow-blue)"/>
+    <text class="msg-text" x="25" y="9">2a. 规则引擎运算 → Ch3/4 音圈 ＋ L2/R2 液压 (125Hz HID+PCM)</text>
+    <text class="msg-note" x="25" y="27">路面微晶 / 砂石 12Hz 拍频 / 刹车硬墙（双手掌心感知）</text>
+
+    <!-- Path B: Broadcast over IPC -->
+    <line x1="6" y1="55" x2="204" y2="55" stroke="#d97706" stroke-width="2" stroke-dasharray="4,2" marker-end="url(#arrow-amber)"/>
+    <text class="msg-text" x="25" y="49">2b. 封装 SIG1 帧广播至 IPC 总线 (&lt; 35µs)</text>
+    <text class="msg-note" x="25" y="67">Magic 0x31474953, TCP_NODELAY, 无监听者时零 I/O</text>
+  </g>
+
+  <!-- Step 3: IPC Dispatch to ds5radio -->
+  <g transform="translate(520, 310)">
+    <!-- Activation Bar on IPC -->
+    <rect x="-6" y="0" width="12" height="40" rx="3" fill="#fde68a"/>
+    <line x1="6" y1="20" x2="199" y2="20" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrow-purple)"/>
+    <text class="msg-text" x="25" y="14">3. 消费端 ReadSignalFrame() 分发给 AI 推理进程</text>
+    <text class="msg-note" x="25" y="32">更新滑动时序窗口 TelemetryWindow</text>
+  </g>
+
+  <!-- Step 4: AI & Classification Window (Loop/Eval) -->
+  <g transform="translate(640, 375)">
+    <rect x="-80" y="0" width="330" height="95" rx="8" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.2"/>
+    <text class="box-label" x="-68" y="18" fill="#5b21b6">4. 情境分析与意图决策 (Classification)</text>
+    <text class="msg-text" x="-68" y="38" fill="#6d28d9">• 滑动窗口计算: d(slip)/dt 剧增, speed=120kph, slip=1.45</text>
+    <text class="msg-text" x="-68" y="56" fill="#6d28d9">• Stage 1 规则匹配 / Stage 2 LLM 生成: 严重打滑失控危机</text>
+    <text class="msg-text" x="-68" y="74" fill="#6d28d9">• 产出 RadioIntent{ID: "tire_slip", Priority: 80, Cooldown: 10s}</text>
+  </g>
+
+  <!-- Step 5: Radio Discipline & Speaker Lock -->
+  <g transform="translate(725, 495)">
+    <!-- Activation Bar on Radio AI -->
+    <rect x="-6" y="0" width="12" height="60" rx="3" fill="#ddd6fe"/>
+    <!-- Self loop -->
+    <path d="M 6 10 C 35 10, 35 40, 6 40" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#arrow-purple)"/>
+    <text class="msg-text" x="42" y="22">5. 检查纪律冷却 (Cooldown) 与扬声器占用互斥锁</text>
+    <text class="msg-note" x="42" y="38">未冷却且当前空闲 → 获取播报排他锁</text>
+  </g>
+
+  <!-- Step 6: DSP Pipeline & DualSense Speaker Output -->
+  <g transform="translate(725, 580)">
+    <line x1="6" y1="20" x2="209" y2="20" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+    <text class="msg-text" x="25" y="14">6. 声学流水线合成并推送至 Ch1/2 扬声器 (pw-play / ALSA)</text>
+    <text class="msg-note" x="25" y="32">PTT Beep In (75ms) + 300~3200Hz 电台滤波 + PTT Beep Out</text>
+  </g>
+
+  <!-- Step 7: Final Result Card at bottom -->
+  <g transform="translate(60, 640)" filter="url(#shadow)">
+    <rect width="980" height="50" rx="8" fill="#ecfdf5" stroke="#6ee7b7" stroke-width="1.5"/>
+    <text class="box-label" x="20" y="24" fill="#065f46">★ 最终体感呈现：手掌中央清晰听到工程师对讲机“嘀…注意，后轮严重打滑，稳住方向！…咔”</text>
+    <text class="card-body" x="20" y="40" fill="#047857">与此同时，Ch3/Ch4 触觉音圈正在手掌两侧狂暴输出 24Hz 砂石浮土切削颗粒震感，声学与力学完美正交独立，互不遮蔽！</text>
+  </g>
+</svg>`;
+
+const outPath = path.join(__dirname, '..', 'docs', 'radio-agent-sequence.svg');
+fs.writeFileSync(outPath, svg, 'utf8');
+console.log('Successfully generated sequence diagram:', outPath);

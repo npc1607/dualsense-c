@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="100%" height="100%">
+  <defs>
+    <!-- Drop Shadows -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <filter id="shadow-lg" x="-6%" y="-6%" width="112%" height="112%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+
+    <!-- Gradients -->
+    <linearGradient id="grad-blue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="grad-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#6d28d9"/>
+    </linearGradient>
+    <linearGradient id="grad-green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </linearGradient>
+    <linearGradient id="grad-amber" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <linearGradient id="grad-slate" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+
+    <!-- Markers -->
+    <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#2563eb" />
+    </marker>
+    <marker id="arrow-purple" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#7c3aed" />
+    </marker>
+    <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#059669" />
+    </marker>
+    <marker id="arrow-amber" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 1.5 L 6.5 4 L 0 6.5 Z" fill="#d97706" />
+    </marker>
+
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 800; font-size: 24px; fill: #0f172a; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13px; fill: #64748b; }
+      .header-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 15px; fill: #ffffff; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 14px; fill: #1e293b; }
+      .card-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 12px; fill: #475569; line-height: 1.5; }
+      .tag { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; font-weight: 600; }
+      .flow-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 11px; font-weight: 600; fill: #475569; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="800" fill="#f1f5f9"/>
+
+  <!-- Top Banner / Title -->
+  <g transform="translate(60, 45)">
+    <text class="title" x="0" y="0">DualSense-C 赛车电台与情境广播架构设计 (Radio Agent Architecture)</text>
+    <text class="subtitle" x="0" y="24">基于统一事件驱动 IPC 总线 ＋ 对标 Audio-AI 分层推理 ＋ DualSense 四声道物理隔离扬声器路由</text>
+  </g>
+
+  <!-- ==================================================================== -->
+  <!-- Layer 1: Data & Game Tier (Top Left & Center)                         -->
+  <!-- ==================================================================== -->
+  <g transform="translate(60, 100)" filter="url(#shadow)">
+    <!-- Outer Container -->
+    <rect width="1080" height="110" rx="12" fill="url(#grad-slate)" stroke="#cbd5e1" stroke-width="1.5"/>
+    <path d="M 0 12 Q 0 0 12 0 L 1068 0 Q 1080 0 1080 12 L 1080 32 L 0 32 Z" fill="url(#grad-blue)"/>
+    <text class="header-text" x="18" y="22">1. 数据源与统一信号中枢 (Telemetry Sources &amp; ds5d Signal Hub)</text>
+
+    <!-- Box 1: Sources -->
+    <g transform="translate(20, 45)">
+      <rect width="320" height="52" rx="8" fill="#ffffff" stroke="#93c5fd" stroke-width="1"/>
+      <text class="card-title" x="12" y="22">游戏遥测输入 (Proton / Native)</text>
+      <text class="card-body" x="12" y="40">ACR (acpmf_physics) / RBR / Forza / Steam 以撒</text>
+    </g>
+
+    <!-- Box 2: ds5d Signal Set -->
+    <g transform="translate(370, 45)">
+      <rect width="340" height="52" rx="8" fill="#ffffff" stroke="#93c5fd" stroke-width="1"/>
+      <text class="card-title" x="12" y="22">ds5d: 信号塑形与归一化 (signal.Set)</text>
+      <text class="card-body" x="12" y="40">死区/SlewLimit 滤波 ＋ 125Hz 触觉引擎分发</text>
+    </g>
+
+    <!-- Box 3: Realtime Haptics Sink -->
+    <g transform="translate(740, 45)">
+      <rect width="320" height="52" rx="8" fill="#ffffff" stroke="#93c5fd" stroke-width="1"/>
+      <text class="card-title" x="12" y="22">触觉下沉 (Haptic / Motor / Trigger)</text>
+      <text class="card-body" x="12" y="40">L2/R2 自适应液压 ＋ HID 双马达 ＋ 音圈 Ch3/4</text>
+    </g>
+
+    <!-- Arrows inside Layer 1 -->
+    <path d="M 340 71 L 366 71" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+    <path d="M 710 71 L 736 71" fill="none" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+  </g>
+
+  <!-- Flow Arrow from ds5d to IPC -->
+  <path d="M 600 210 L 600 246" fill="none" stroke="#d97706" stroke-width="2.5" stroke-dasharray="4,4" marker-end="url(#arrow-amber)"/>
+  <rect x="535" y="220" width="130" height="18" rx="4" fill="#fef3c7" stroke="#fde68a" stroke-width="1"/>
+  <text class="tag" x="542" y="233" fill="#b45309">时序遥测广播 (SIG1)</text>
+
+  <!-- ==================================================================== -->
+  <!-- Layer 2: Unified IPC Event Bus (Middle)                               -->
+  <!-- ==================================================================== -->
+  <g transform="translate(60, 252)" filter="url(#shadow)">
+    <rect width="1080" height="95" rx="12" fill="url(#grad-slate)" stroke="#fde68a" stroke-width="1.5"/>
+    <path d="M 0 12 Q 0 0 12 0 L 1068 0 Q 1080 0 1080 12 L 1080 32 L 0 32 Z" fill="url(#grad-amber)"/>
+    <text class="header-text" x="18" y="22">2. 统一低延迟 IPC 事件总线 (internal/vpad/ipc · &lt; 35µs · 零空闲开销)</text>
+
+    <!-- IPC Channel 1: FFB1 -->
+    <g transform="translate(20, 42)">
+      <rect width="400" height="42" rx="6" fill="#fffbeb" stroke="#fcd34d" stroke-width="1"/>
+      <text class="card-title" x="12" y="18" fill="#92400e">FFB1 协议: 力反馈震动注入通道</text>
+      <text class="tag" x="12" y="34" fill="#b45309">Magic: 0x31424646 · 目标: ds5vpad (DirectInput8 / XInput)</text>
+    </g>
+
+    <!-- IPC Channel 2: SIG1 -->
+    <g transform="translate(450, 42)">
+      <rect width="610" height="42" rx="6" fill="#fffbeb" stroke="#fcd34d" stroke-width="1"/>
+      <text class="card-title" x="12" y="18" fill="#92400e">SIG1 协议: 统一遥测时序分发通道</text>
+      <text class="tag" x="12" y="34" fill="#b45309">Magic: 0x31474953 · 目标: ds5radio (电台AI) / Dashboard / LLM Agent</text>
+    </g>
+  </g>
+
+  <!-- Flow Arrow from IPC to Radio AI -->
+  <path d="M 755 347 L 755 385" fill="none" stroke="#7c3aed" stroke-width="2.5" marker-end="url(#arrow-purple)"/>
+  <rect x="700" y="358" width="110" height="18" rx="4" fill="#ede9fe" stroke="#ddd6fe" stroke-width="1"/>
+  <text class="tag" x="708" y="371" fill="#6d28d9">IPC Client Dial</text>
+
+  <!-- ==================================================================== -->
+  <!-- Layer 3: AI & LLM Inference Tier (Middle Lower)                       -->
+  <!-- ==================================================================== -->
+  <g transform="translate(60, 390)" filter="url(#shadow-lg)">
+    <rect width="1080" height="165" rx="12" fill="url(#grad-slate)" stroke="#ddd6fe" stroke-width="1.5"/>
+    <path d="M 0 12 Q 0 0 12 0 L 1068 0 Q 1080 0 1080 12 L 1080 32 L 0 32 Z" fill="url(#grad-purple)"/>
+    <text class="header-text" x="18" y="22">3. Radio AI 识别与情境推理层 (对标 internal/audioai 的标准分层)</text>
+
+    <!-- Stage 1: Classifier Interface & Window -->
+    <g transform="translate(20, 45)">
+      <rect width="320" height="105" rx="8" fill="#ffffff" stroke="#c4b5fd" stroke-width="1"/>
+      <text class="card-title" x="12" y="22">滑动时序窗口 (TelemetryWindow)</text>
+      <text class="card-body" x="12" y="42">• 缓存 3~5 秒连续帧：转速/车速/G值/滑移率</text>
+      <text class="card-body" x="12" y="62">• 计算微积分变化率：d(slip)/dt, d(speed)/dt</text>
+      <text class="tag" x="12" y="88" fill="#6d28d9">type Classifier interface { Classify() }</text>
+    </g>
+
+    <!-- Stage 2: Dual Backend (Rule vs LLM) -->
+    <g transform="translate(360, 45)">
+      <rect width="370" height="105" rx="8" fill="#ffffff" stroke="#c4b5fd" stroke-width="1"/>
+      <text class="card-title" x="12" y="22">双形态推理后端 (Rule vs LLM)</text>
+      <text class="card-body" x="12" y="42"><b>Stage 1: RuleClassifier (内置确定性规则)</b></text>
+      <text class="card-body" x="12" y="58">  - 零外部依赖，极速判断过热/失控/撞击 (&lt; 1µs)</text>
+      <text class="card-body" x="12" y="78"><b>Stage 2: LLMClassifier (本地 SLM / ONNX)</b></text>
+      <text class="card-body" x="12" y="94">  - 战局叙事理解、对手缠斗、进站策略生成</text>
+    </g>
+
+    <!-- Stage 3: Intent & Radio Discipline -->
+    <g transform="translate(750, 45)">
+      <rect width="310" height="105" rx="8" fill="#ffffff" stroke="#c4b5fd" stroke-width="1"/>
+      <text class="card-title" x="12" y="22">无线电意图与纪律 (RadioIntent)</text>
+      <text class="card-body" x="12" y="42">• 优先级抢占：Crash (100) &gt; Mech (70) &gt; Pace</text>
+      <text class="card-body" x="12" y="62">• 纪律冷却 (Cooldown)：防连环啰嗦提示</text>
+      <text class="card-body" x="12" y="82">• 对讲机占线排队：互斥锁拒绝重叠破音</text>
+    </g>
+
+    <!-- Connectors -->
+    <path d="M 340 97 L 356 97" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrow-purple)"/>
+    <path d="M 730 97 L 746 97" fill="none" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrow-purple)"/>
+  </g>
+
+  <!-- Flow Arrow from Radio AI to Speaker Plane -->
+  <path d="M 600 555 L 600 595" fill="none" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-green)"/>
+  <rect x="525" y="567" width="150" height="18" rx="4" fill="#d1fae5" stroke="#a7f3d0" stroke-width="1"/>
+  <text class="tag" x="532" y="580" fill="#047857">Dispatch Radio Audio</text>
+
+  <!-- ==================================================================== -->
+  <!-- Layer 4: Acoustic Pipeline & Speaker Routing (Bottom)                 -->
+  <!-- ==================================================================== -->
+  <g transform="translate(60, 600)" filter="url(#shadow)">
+    <rect width="1080" height="155" rx="12" fill="url(#grad-slate)" stroke="#a7f3d0" stroke-width="1.5"/>
+    <path d="M 0 12 Q 0 0 12 0 L 1068 0 Q 1080 0 1080 12 L 1080 32 L 0 32 Z" fill="url(#grad-green)"/>
+    <text class="header-text" x="18" y="22">4. 对讲机声学流水线与 DualSense 四声道物理定向隔离</text>
+
+    <!-- Acoustic Filter Chain -->
+    <g transform="translate(20, 45)">
+      <rect width="420" height="95" rx="8" fill="#ffffff" stroke="#6ee7b7" stroke-width="1"/>
+      <text class="card-title" x="12" y="22">F1 对讲机声学流水线 (Radio DSP Pipeline)</text>
+      <text class="card-body" x="12" y="42">1. <b>PTT Beep In</b>: 75ms 双音 (1200+1800Hz) ＋ 35ms 电台底噪</text>
+      <text class="card-body" x="12" y="60">2. <b>电台滤波</b>: 300Hz~3200Hz 军用带通 ＋ 4:1 压缩微过载</text>
+      <text class="card-body" x="12" y="78">3. <b>PTT Beep Out</b>: 30ms 释音杂音 ＋ 60ms 900Hz 结束嘀声</text>
+    </g>
+
+    <!-- Hardware Orthogonal Routing -->
+    <g transform="translate(460, 45)">
+      <rect width="600" height="95" rx="8" fill="#ffffff" stroke="#6ee7b7" stroke-width="1"/>
+      <text class="card-title" x="12" y="22">DualSense 4 声道声卡物理正交路由 (Physical Separation)</text>
+
+      <!-- Channel 1/2 -->
+      <rect x="12" y="34" width="280" height="50" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="1.2"/>
+      <text class="card-title" x="20" y="52" fill="#065f46">Ch1/2 (FL/FR): 正面内置扬声器</text>
+      <text class="card-body" x="20" y="70" fill="#047857">赛车工程师电台 / 领航员路书 / 以撒提示音</text>
+
+      <!-- Channel 3/4 -->
+      <rect x="306" y="34" width="280" height="50" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.2"/>
+      <text class="card-title" x="314" y="52" fill="#1e40af">Ch3/4 (RL/RR): 高清触觉音圈</text>
+      <text class="card-body" x="314" y="70" fill="#1d4ed8">底盘路感 / 砂石 12Hz 拍频 / 飞坡触底重锤</text>
+    </g>
+  </g>
+</svg>

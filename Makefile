@@ -12,6 +12,7 @@ build:
 	$(GO) build $(GOFLAGS) -o $(BIN)/ds5d ./cmd/ds5d
 	$(GO) build $(GOFLAGS) -o $(BIN)/ds5ctl ./cmd/ds5ctl
 	$(GO) build $(GOFLAGS) -o $(BIN)/ds5vpad ./cmd/ds5vpad
+	$(GO) build $(GOFLAGS) -o $(BIN)/ds5radio ./cmd/ds5radio
 	$(GO) build $(GOFLAGS) -o $(BIN)/ffclient ./tools/ffclient
 
 # Optional build with the in-process audio AI classifier (ONNX Runtime, CGO).

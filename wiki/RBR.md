@@ -114,19 +114,19 @@ python3 tools/…                      # 或任意发包脚本
 
 ---
 
-## 4. 输入侧：`ds5vpad -proto dinput8`（原生 DirectInput 8 架构）
+## 4. 输入侧：`ds5vpad -proto dinput8`（原生 DirectInput 8 架构与实战避坑）
 
 RBR 是纯 DirectInput 8 游戏，在 2004 年没有 Xbox 360 手柄的概念，它要求**所有踏板和摇杆都是独立的 16 位满行程轴**：
 - **摇杆**：`-32768..32767`，居中为 0。
-- **踏板（L2 刹车、R2 油门）**：作为独立模拟踏板，未按时为 `0`，踩到底为 `32767`。
-- **按键**：标准 DirectInput 原始按键 1..12。
+- **踏板（L2 刹车、R2 油门）**：作为独立模拟踏板，未按时为 `-32768`，踩到底为 `32767`（全行程高达 65535）。
+- **按键**：标准 Linux `BTN_GAMEPAD` 规范按键 1..10。
 
 `-proto dinput8` 专门为此而设计（基于罗技 Dual Action `046d:c216` 协议）：
 - `ABS_X` / `ABS_Y`：左摇杆（左右/上下），`-32768..32767`
 - `ABS_RX` / `ABS_RY`：右摇杆（左右/上下），`-32768..32767`
-- `ABS_Z`（L2 刹车踏板）：独立轴，`0..32767`
-- `ABS_RZ`（R2 油门踏板）：独立轴，`0..32767`
-- 按钮：`BTN_TRIGGER` 到 `BTN_BASE6`，对应 DirectInput Button 1..12
+- `ABS_Z`（L2 刹车踏板）：独立轴，`-32768..32767`
+- `ABS_RZ`（R2 油门踏板）：独立轴，`-32768..32767`
+- 按钮：`BTN_SOUTH` 到 `BTN_THUMBR`，直接映射为 DirectInput Button 1..10
 
 这样在 RBR 的 `Controller Setup` 界面：
 - **`Steering`**：按回车 → 拨动左摇杆左右 → 识别为 **X 轴**
@@ -134,40 +134,38 @@ RBR 是纯 DirectInput 8 游戏，在 2004 年没有 Xbox 360 手柄的概念，
 - **`Footbrake`**：按回车 → 踩下 **L2** → 识别为 **Z 轴**
 - **`Gear Up`**：按回车 → 按 **× 键** → 识别为 **Button 1**
 - **`Gear Down`**：按回车 → 按 **口 键** → 识别为 **Button 3**
-- **`Accelerate and Brake`（合并轴）**：按 **DEL** 清空
-实现完美的左脚刹车与独立油门控制。
+- **`Handbrake`**：按回车 → 按 **○ 键** → 识别为 **Button 2**
+- **`Accelerate and Brake`（合并轴）**：按 **DEL** 清空（必须清空，否则刹车常驻 50%）
 
-### 顺带修掉的 bug：`uinput_user_dev` 的轴范围
+---
 
-`absmax[]` / `absmin[]` / `absfuzz[]` / `absflat[]` 是**四个独立的 4 字节数组**，
-`absmin` 从 `absmax` 之后 `ABS_CNT*4 = 256` 字节开始，不是 `ABS_CNT = 64` 字节。
-写错时所有轴的 min 都会变成 0（摇杆变成 0..32767 的单边轴、合并扳机轴也是单边），
-表现就是"游戏只认摇杆/扳机没反应"。
+### 实战踩坑与终极排错经验
 
-验证：
+#### 1. 踩踏板“松开显示 100% 满载，踩下反而归零”（轴反向）
+- **根因**：DualSense 物理扳机松开时是 `-32768`，踩到底为 `+32767`。而 2004 年 RBR 默认沿用了老式航空节气门定义，把物理最小值判断为“油门踩死”，把最大值判断为“怠速”。
+- **解决**：在 `input.ini` 与 `rsf_launcher/Configs/default.ini` 中设置轴反转：
+  ```ini
+  InvertThrottleAxis = true
+  InvertBrakeAxis = true
+  ```
+  或者在游戏内 `Options -> Controls -> Filter / Customise Controls` 里把 `Throttle` 和 `Footbrake` 后面的 `Invert` 切为 `ON` 即可。
 
-```bash
-python3 - <<'EOF'
-import fcntl, struct
-EVIOCGABS = lambda a: 0x80000000 | (24 << 16) | (0x45 << 8) | (0x40 + a)
-fd = open('/dev/input/eventN','rb')            # N = ds5vpad 打印的节点
-for axis in (0,1,2,5):
-    v = fcntl.ioctl(fd, EVIOCGABS(axis), bytes(24))
-    print(axis, struct.unpack('6i', v)[1:3])   # (min, max)
-EOF
-# 期望：X/Y/Z 都是 (-32768, 32767)，RZ 是 (0, 255)
-```
+#### 2. “刹车处于一半进程（Z axis）且卡住”（合并轴冲突）
+- **根因**：游戏默认勾选了老式单轴合并油门刹车（`Accelerate and Brake`），由于居中值为 0，游戏默认折算为 50% 刹车。
+- **解决**：在 `Controller Setup` 选中 `Accelerate and Brake`，按键盘 **Delete** 键清空。
 
-### 仍未解决
+#### 3. “手柄按键按了完全没反应，只有摇杆能识别”
+- **根因**：Wine 的 `winebus.sys` 驱动层对通用 Gamepad 严格只认 `0x130 (BTN_SOUTH)`..`0x13e (BTN_THUMBR)`。如果底层虚拟手柄驱动把按键发成了老式飞行摇杆段的 `BTN_TRIGGER (0x120)`，Wine 会当成非手柄摇杆忽略，导致游戏在 DirectInput 下接收到 0 个按键。
+- **解决**：`ds5vpad -proto dinput8` 采用标准 `BTN_GAMEPAD` 协议直通，手柄按键即可完美映射为 Button 1..10。
 
-RBR `Options → Controls` 里**扳机轴依旧绑不上**（虚拟手柄和真实 DS5 都一样，只有摇杆能绑）。
-已排除的方向：轴范围、合并/拆分扳机、Steam Input、设备被独占、uinput absinfo。
-下一步候选：
-
-1. 直接写 `SavedGames/pf*.acm`（RBR 的绑定存在这里：`PAMA` + 设备 GUID + `DEST` +
-   `(code, index, type)` 三元组表），绕开 UI；
-2. 油门/刹车退回键盘数字输入（RBR 支持键盘轴的渐变），接受手感损失；
-3. 用 `input-remapper` 之类把扳机映射到 RBR 认的轴（待验证是否同样绑不上）。
+#### 4. “设置好了键位，下次进游戏按键设置又空了”
+- **根因一（只读权限）**：从 7z 包解压出来的 `SavedGames/pfsam.acm` 往往携带 Windows 只读属性（在 Linux NTFS 上表现为 `0444`），导致游戏退回菜单时写盘失败；
+- **根因二（强退丢数据）**：RBR 只有在按 **Esc** 返回上一级菜单并正常退出游戏时，才会将内存中的按键表固化保存到 `pfsam.acm`。若游戏卡死使用 `kill -9` 强杀进程，内存中的修改来不及写盘；
+- **解决**：
+  ```bash
+  chmod 666 "SavedGames/pfsam.acm"
+  ```
+  在游戏内按要求配好后，**按 Esc 键正常返回上一级菜单保存一次**，即可永久固化，以后重启游戏再也不需要重复设置！
 
 ---
 

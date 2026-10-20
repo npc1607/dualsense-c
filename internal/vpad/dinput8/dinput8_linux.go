@@ -15,34 +15,40 @@ import (
 	"github.com/npc1607/dualsense-c/internal/vpad"
 )
 
-// Linux evdev standard joystick button codes (0x120..0x12b),
-// which DirectInput 8 enumerates as discrete Button 1..12.
+// Linux evdev button codes for gamepads and joysticks.
+// Wine / Proton's winebus.sys maps BTN_GAMEPAD (0x130..) directly to DirectInput 8
+// buttons in standard order:
+//   0x130 (BTN_SOUTH / Cross)    -> DirectInput Button 1
+//   0x131 (BTN_EAST  / Circle)   -> DirectInput Button 2
+//   0x133 (BTN_WEST  / Square)   -> DirectInput Button 3
+//   0x134 (BTN_NORTH / Triangle) -> DirectInput Button 4
+//   0x136 (BTN_TL    / L1)       -> DirectInput Button 5
+//   0x137 (BTN_TR    / R1)       -> DirectInput Button 6
+//   0x13a (BTN_SELECT/ Share)    -> DirectInput Button 7
+//   0x13b (BTN_START / Options)  -> DirectInput Button 8
+//   0x13d (BTN_THUMBL/ L3)       -> DirectInput Button 9
+//   0x13e (BTN_THUMBR/ R3)       -> DirectInput Button 10
+//   0x13c (BTN_MODE  / PS)       -> DirectInput Button 11
 const (
-	btn1  = 0x120 // BTN_TRIGGER / Button 1 (DualSense Cross / ×)
-	btn2  = 0x121 // BTN_THUMB   / Button 2 (DualSense Circle / ○)
-	btn3  = 0x122 // BTN_THUMB2  / Button 3 (DualSense Square / 口)
-	btn4  = 0x123 // BTN_TOP     / Button 4 (DualSense Triangle / △)
-	btn5  = 0x124 // BTN_TOP2    / Button 5 (DualSense L1)
-	btn6  = 0x125 // BTN_PINKIE  / Button 6 (DualSense R1)
-	btn7  = 0x126 // BTN_BASE    / Button 7 (DualSense L2 digital)
-	btn8  = 0x127 // BTN_BASE2   / Button 8 (DualSense R2 digital)
-	btn9  = 0x128 // BTN_BASE3   / Button 9 (DualSense Create / Share)
-	btn10 = 0x129 // BTN_BASE4   / Button 10 (DualSense Options)
-	btn11 = 0x12a // BTN_BASE5   / Button 11 (DualSense L3)
-	btn12 = 0x12b // BTN_BASE6   / Button 12 (DualSense R3)
+	btnSouth  = 0x130 // Cross / ×
+	btnEast   = 0x131 // Circle / ○
+	btnNorth  = 0x134 // Triangle / △
+	btnWest   = 0x133 // Square / 口
+	btnTL     = 0x136 // L1
+	btnTR     = 0x137 // R1
+	btnSelect = 0x13a // Create / Share
+	btnStart  = 0x13b // Options
+	btnMode   = 0x13c // PS
+	btnThumbL = 0x13d // L3
+	btnThumbR = 0x13e // R3
 
-	// Physical DualSense input codes from hid-playstation
-	dsBtnSouth  = 0x130 // Cross / ×
-	dsBtnEast   = 0x131 // Circle / ○
-	dsBtnNorth  = 0x134 // Triangle / △
-	dsBtnWest   = 0x133 // Square / 口
-	dsBtnTL     = 0x136 // L1
-	dsBtnTR     = 0x137 // R1
-	dsBtnSelect = 0x13a // Create / Share
-	dsBtnStart  = 0x13b // Options
-	dsBtnMode   = 0x13c // PS
-	dsBtnThumbL = 0x13d // L3
-	dsBtnThumbR = 0x13e // R3
+	// Legacy joystick button block for generic DInput compatibility
+	btnTrigger = 0x120
+	btnThumb   = 0x121
+	btnThumb2  = 0x122
+	btnTop     = 0x123
+	btnTop2    = 0x124
+	btnPinkie  = 0x125
 
 	btnDpadUp = 0x220
 	btnDpadDn = 0x221
@@ -93,9 +99,12 @@ func Open(cfg vpad.Config, sink vpad.RumbleSink) (vpad.Pad, error) {
 	setInt(vpad.UiSetEvBit, vpad.EvSyn)
 	setInt(vpad.UiSetEvBit, vpad.EvFF)
 
-	// Discrete DirectInput buttons (1..12)
-	for _, k := range []int{btn1, btn2, btn3, btn4, btn5, btn6, btn7, btn8, btn9, btn10, btn11, btn12,
-		btnDpadUp, btnDpadDn, btnDpadLt, btnDpadRt} {
+	// Register BTN_GAMEPAD and BTN_JOYSTICK button ranges
+	for _, k := range []int{
+		btnSouth, btnEast, btnWest, btnNorth, btnTL, btnTR, btnSelect, btnStart, btnMode, btnThumbL, btnThumbR,
+		btnTrigger, btnThumb, btnThumb2, btnTop, btnTop2, btnPinkie,
+		btnDpadUp, btnDpadDn, btnDpadLt, btnDpadRt,
+	} {
 		setInt(vpad.UiSetKeyBit, k)
 	}
 
@@ -120,15 +129,12 @@ func Open(cfg vpad.Config, sink vpad.RumbleSink) (vpad.Pad, error) {
 		binary.LittleEndian.PutUint32(dev[base+absCnt*4:], uint32(lo)) // absmin
 	}
 
-	// Sticks are centred bipolar axes (-32768..32767)
-	for _, c := range []int{vpad.AbsX, vpad.AbsY, vpad.AbsRX, vpad.AbsRY} {
+	// In DirectInput 8, ALL analog axes operate across the full bipolar -32768..32767 range:
+	// - Sticks (X, Y, RX, RY): centred at 0, moving -32768..32767.
+	// - Pedals (Z for L2 Brake, RZ for R2 Throttle): resting at -32768, fully depressed at +32767.
+	// This ensures games like RBR detect massive axis movement when pedals are pressed.
+	for _, c := range []int{vpad.AbsX, vpad.AbsY, vpad.AbsRX, vpad.AbsRY, vpad.AbsZ, vpad.AbsRZ} {
 		setAbs(c, -32768, 32767)
-	}
-
-	// Triggers in DirectInput 8 are independent unipolar pedal axes (rest 0, pressed 32767).
-	// Z = L2 (Brake), RZ = R2 (Throttle).
-	for _, c := range []int{vpad.AbsZ, vpad.AbsRZ} {
-		setAbs(c, 0, 32767)
 	}
 
 	// D-pad hat (-1..1)
@@ -285,8 +291,10 @@ func (p *pad) translate(buf []byte) []byte {
 				if code == vpad.AbsX || code == vpad.AbsY || code == vpad.AbsRX || code == vpad.AbsRY {
 					val = vpad.ScaleStick(val)
 				} else if code == vpad.AbsZ || code == vpad.AbsRZ {
-					// DirectInput 8 unipolar pedal axis: 0..255 -> 0..32767
-					val = (vpad.ClampByte(val) * 32767) / 255
+					// DualSense trigger 0..255 -> DirectInput 8 unipolar pedal axis:
+					// Rest (unpressed) = -32768, Fully depressed = +32767
+					c := vpad.ClampByte(val)
+					val = int32(-32768 + (int64(c)*65535)/255)
 				}
 				out = vpad.AppendEvent(out, vpad.EvAbs, mapped, val)
 			}
@@ -307,30 +315,15 @@ func mapAbs(code uint16) (uint16, bool) {
 	return 0, false
 }
 
-// mapKeyDInput8 maps DualSense buttons directly to standard DirectInput 8 buttons (1..12).
+// mapKeyDInput8 maps DualSense buttons directly into standard BTN_GAMEPAD codes.
+// Proton/Wine winebus.sys maps these directly to Windows DirectInput Button 1..10.
+// Notice: digital trigger bits (0x138/0x139) are discarded so L2 and R2 act exclusively
+// as analog pedal axes in RBR controller setup.
 func mapKeyDInput8(code uint16) (uint16, bool) {
 	switch code {
-	case dsBtnSouth: // Cross / × -> Button 1
-		return btn1, true
-	case dsBtnEast: // Circle / ○ -> Button 2
-		return btn2, true
-	case dsBtnWest: // Square / 口 -> Button 3
-		return btn3, true
-	case dsBtnNorth: // Triangle / △ -> Button 4
-		return btn4, true
-	case dsBtnTL: // L1 -> Button 5
-		return btn5, true
-	case dsBtnTR: // R1 -> Button 6
-		return btn6, true
-	case dsBtnSelect: // Create / Share -> Button 9
-		return btn9, true
-	case dsBtnStart: // Options -> Button 10
-		return btn10, true
-	case dsBtnThumbL: // L3 -> Button 11
-		return btn11, true
-	case dsBtnThumbR: // R3 -> Button 12
-		return btn12, true
-	case btnDpadUp, btnDpadDn, btnDpadLt, btnDpadRt:
+	case btnSouth, btnEast, btnWest, btnNorth, btnTL, btnTR,
+		btnSelect, btnStart, btnMode, btnThumbL, btnThumbR,
+		btnDpadUp, btnDpadDn, btnDpadLt, btnDpadRt:
 		return code, true
 	}
 	return 0, false

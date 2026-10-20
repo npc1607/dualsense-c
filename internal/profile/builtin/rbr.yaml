@@ -1,32 +1,37 @@
-# 理查德·伯恩斯拉力赛（RBR / RallySimFans 版）—— NGP 内置 UDP 遥测
+# 理查德·伯恩斯拉力赛（RBR / RallySimFans 版）—— NGP 664 字节高拟真力学遥测
 #
-# 数据来源：NGP 插件（Plugins/NGP）自带的 UDP telemetry。
+# 数据来源：NGP 插件（Plugins/NGP）原生 UDP telemetry。
 # 包结构来自 Plugins/NGP/sdk/rbr.telemetry.data.TelemetryData.h：
 #   #pragma pack(1)，定长 664 字节（u32 totalSteps + Stage + Control + Car）
-# 这里的 off 就是该头文件按 pack(1) 展开后的字节偏移，改版本后请重新核对。
 #
-# 游戏内必须先打开遥测（两条路任选）：
+# 游戏内打开遥测（两条路任选）：
 #   1) 进游戏 → Plugins → NGP → 按 U 切到开启（值会写回 RichardBurnsRally.ini）
-#   2) 直接改 RichardBurnsRally.ini：
+#   2) 直接在 RichardBurnsRally.ini 与 rsf_launcher/Configs/default.ini 确认：
 #        [NGP]
 #        udpTelemetry=1
 #        udpTelemetryEndpoints=127.0.0.1:6776
 #        telemetryTics=5         ; 每 5 个物理 tick 发一包
 #   UDP 遥测只在 GAME 模式（进赛道后）发送，菜单/回放里没有数据。
 #
-# 验证：
-#   ./bin/ds5d -dry-run -profile rbr -trace      # 进赛道后 throttle/brake/speed/rpm 应有变化
-#   ./bin/ds5ctl sniff -listen 0.0.0.0:6776      # 没有数据时先用它确认包里到底有没有东西
-#
-# 调参提示：damper_* 是悬挂阻尼活塞速度，单位取决于 NGP（通常 m/s），
-# 所以下面所有 smoothstep 的阈值都只是起点，按实际路面手感再改。
+# 架构与感官体验特色：
+#   1. 踏板液压手感（L2/R2 线性阻尼）：
+#      - L2 刹车：高拟真赛车单回路无助力液压脚感，前段空行程，中段渐进饱满，后段 255 刚性液压墙；
+#      - R2 油门：舒适抗疲劳回弹阻尼，高转速/红线换挡转速回馈轻震；
+#   2. 3D 砂石路面颗粒纹理（双音圈 Stereo Voice Coils）：
+#      - 左音圈 52Hz 捕获前悬挂活塞颠簸，右音圈 40Hz 捕获后轴拖拽与砂石飞溅，两路形成 12Hz 拍频；
+#   3. 车身重心转移与钟摆漂移（HID 左右马达）：
+#      - 横向离心载荷转弯支撑感、斯堪的纳维亚钟摆（Scandinavian Flick）车尾甩出瞬间脉冲；
+#      - 四轮滑移侧滑砂石磨削触感、芬兰大跳跃（Big Crest Jump）重着陆触底重锤；
+#      - 手刹抱死后轮急促方波脉冲；
+#   4. 动态座舱仪表灯条：
+#      - 油门翠绿、刹车赛车红、接近 8000 转红线电光蓝换挡提示、手刹拉起琥珀警示。
 
 name: rbr
 title: 理查德·伯恩斯拉力赛（RBR / RSF，NGP UDP 6776）
 description: |
-  NGP UDP 遥测（664 字节定长包，pack(1)）。刹车 → L2 持续阻力，油门 → R2 持续阻力，
-  前/后悬挂阻尼速度 → 音圈路面纹理，落地冲击 → 左右马达，手刹 → 右马达脉冲，
-  刹车/油门 → 灯条红绿，逼近红线 → 灯条蓝。
+  NGP 664 字节高拟真赛车力学：无助力液压刹车 + 柔性渐进油门，
+  立体声双音圈砂石碎震拍频，重力载荷转移 + 钟摆甩尾瞬态脉冲，
+  飞坡落地重锤防触底与手刹抱死反馈。
 
 source:
   type: udp
@@ -34,11 +39,11 @@ source:
   decoder: fields
   rate_hz: 120
   fields:
-    # --- 赛段 ---
+    # --- 赛段信息 (Stage) ---
     progress:         { off: 8,   fmt: f32 }   # 赛段进度 0..1
     race_time:        { off: 12,  fmt: f32 }
     distance_end:     { off: 20,  fmt: f32 }
-    # --- 驾驶输入 ---
+    # --- 车手驾驶输入 (Control) ---
     steer:            { off: 24,  fmt: f32 }
     throttle:         { off: 28,  fmt: f32 }
     brake:            { off: 32,  fmt: f32 }
@@ -46,43 +51,90 @@ source:
     clutch:           { off: 40,  fmt: f32 }
     gear:             { off: 44,  fmt: s32 }
     footbrake_press:  { off: 48,  fmt: f32 }
-    # --- 车体 ---
+    handbrake_press:  { off: 52,  fmt: f32 }
+    # --- 车体运动速度与角速度 (Car Kinematics) ---
     speed:            { off: 60,  fmt: f32 }   # kph
-    accel_long:       { off: 112, fmt: f32 }   # 纵向加速度
-    accel_lat:        { off: 116, fmt: f32 }   # 横向加速度
-    accel_vert:       { off: 120, fmt: f32 }   # 垂直加速度（落地）
-    rpm:              { off: 136, fmt: f32 }
-    # --- 悬挂阻尼（LF/RF/LB/RB 每轮 128 字节）---
-    damper_lf:        { off: 180, fmt: f32 }
-    damper_rf:        { off: 308, fmt: f32 }
-    damper_lb:        { off: 436, fmt: f32 }
-    damper_rb:        { off: 564, fmt: f32 }
-    # --- 刹车盘 / 胎温（选做灯条与热衰减）---
+    vel_surge:        { off: 88,  fmt: f32 }   # 纵向前进速度 (m/s)
+    vel_sway:         { off: 92,  fmt: f32 }   # 横向侧滑速度 (m/s，漂移与甩尾)
+    vel_heave:        { off: 96,  fmt: f32 }   # 垂直起伏速度 (m/s)
+    vel_yaw:          { off: 108, fmt: f32 }   # 横摆自旋角速度 (rad/s)
+    # --- 车体动力学加速度 G 值 (Car Accelerations) ---
+    accel_long:       { off: 112, fmt: f32 }   # 纵向加速度 (m/s²，加减速载荷)
+    accel_lat:        { off: 116, fmt: f32 }   # 横向加速度 (m/s²，转弯离心载荷)
+    accel_vert:       { off: 120, fmt: f32 }   # 垂直加速度 (m/s²，飞坡与重着陆冲击)
+    accel_yaw:        { off: 132, fmt: f32 }   # 横摆角加速度 (rad/s²，钟摆甩尾瞬态)
+    rpm:              { off: 136, fmt: f32 }   # 发动机转速
+    # --- 四轮悬挂与避震活塞速度 (Suspension 4x128 字节) ---
+    spring_lf:        { off: 152, fmt: f32 }
+    damper_lf:        { off: 180, fmt: f32 }   # 左前避震活塞运动速度 (m/s)
     brake_temp_lf:    { off: 188, fmt: f32 }
-    brake_temp_rf:    { off: 316, fmt: f32 }
     tread_lf:         { off: 208, fmt: f32 }
-    tread_rf:         { off: 336, fmt: f32 }
-  # 注意：derived 由 udp 解码器编译，环境里只有字段本身，
-  # 没有 clamp/absf 这些规则函数，所以绝对值只能手写。
-  derived:
-    damper_front: "max(max(damper_lf, -damper_lf), max(damper_rf, -damper_rf))"
-    damper_rear:  "max(max(damper_lb, -damper_lb), max(damper_rb, -damper_rb))"
-    # 注意：derived 之间不能互相引用（解码器按 map 顺序编译，顺序不确定），
-    # 所以 jolt 直接从原始字段展开。
-    jolt:         "max(max(max(damper_lf, -damper_lf), max(damper_rf, -damper_rf)), max(max(damper_lb, -damper_lb), max(damper_rb, -damper_rb)))"
-    brake_temp:   "max(brake_temp_lf, brake_temp_rf)"
 
-# 非标准信号（标准词表见 internal/signal/names.go）必须在这里声明，
-# 否则规则表达式里引用会报 "unknown name"。
-signals: [handbrake, accel_lat, accel_vert, damper_front, damper_rear, jolt, brake_temp]
+    spring_rf:        { off: 280, fmt: f32 }
+    damper_rf:        { off: 308, fmt: f32 }   # 右前避震活塞速度
+    brake_temp_rf:    { off: 316, fmt: f32 }
+    tread_rf:         { off: 336, fmt: f32 }
+
+    spring_lb:        { off: 408, fmt: f32 }
+    damper_lb:        { off: 436, fmt: f32 }   # 左后避震活塞速度
+    brake_temp_lb:    { off: 444, fmt: f32 }
+    tread_lb:         { off: 464, fmt: f32 }
+
+    spring_rb:        { off: 536, fmt: f32 }
+    damper_rb:        { off: 564, fmt: f32 }   # 右后避震活塞速度
+    brake_temp_rb:    { off: 572, fmt: f32 }
+    tread_rb:         { off: 592, fmt: f32 }
+
+  derived:
+    # 前后轴悬挂绝对颠簸量
+    damper_front: "max(abs(damper_lf), abs(damper_rf))"
+    damper_rear:  "max(abs(damper_lb), abs(damper_rb))"
+    # 全车四轮最大冲击速度
+    jolt:         "max(max(abs(damper_lf), abs(damper_rf)), max(abs(damper_lb), abs(damper_rb)))"
+    # 车体横向侧滑绝对速度
+    slide_speed:  "abs(vel_sway)"
+    # 悬挂弹簧最大压缩形变
+    spring_comp:  "max(max(spring_lf, spring_rf), max(spring_lb, spring_rb))"
+    brake_temp:   "max(max(brake_temp_lf, brake_temp_rf), max(brake_temp_lb, brake_temp_rb))"
+
+# 注册非标准遥测信号
+signals:
+  - handbrake
+  - footbrake_press
+  - handbrake_press
+  - vel_surge
+  - vel_sway
+  - vel_heave
+  - vel_yaw
+  - accel_long
+  - accel_lat
+  - accel_vert
+  - accel_yaw
+  - damper_front
+  - damper_rear
+  - jolt
+  - slide_speed
+  - spring_comp
+  - brake_temp
 
 safety:
   signal_ttl: 500ms
   release: 250ms
   status_lightbar: true
 
+# 双音圈触感输出（USB Audio 声卡 Ch3/4）
+haptics:
+  target: auto
+  carrier_hz: 52
+  gain: 0.95
+
 rules:
-  # ---- 刹车 → L2 持续阻力 ----------------------------------------------
+  # ======================================================================
+  # 1. 踏板手感：L2 赛车无助力液压刹车 + R2 渐进油门
+  # ======================================================================
+
+  # ---- 刹车 → L2 无助力液压踏板阻尼 ------------------------------------
+  # 前段微小空行程，中段踏板力线性陡增，后段坚挺刚性液压墙
   - name: l2-brake
     when: 'has("brake")'
     target: l2
@@ -90,9 +142,20 @@ rules:
     priority: 10
     params:
       start: "0"
-      force: "clamp(20 + 235 * brake, 0, 255)"
+      force: "clamp(curve(brake, 0.0, 18.0, 0.05, 36.0, 0.50, 160.0, 0.85, 235.0, 1.0, 255.0), 0, 255)"
 
-  # ---- 油门 → R2 持续阻力（后段加硬，模拟油门踏板到底） ----------------
+  # ---- 刹车抱死警示 → 左马达高频脉冲 ----------------------------------
+  # 在车速高于 25kph 时大脚重刹导致四轮严重滑移，左马达触发 18Hz 脉冲，提示车手释放刹车防推头
+  - name: brake-lockup-warning
+    when: 'brake > 0.65 && speed > 25 && slide_speed > 3.0'
+    target: rumble_left
+    priority: 35
+    hold: 60ms
+    value: "190"
+    modulate: { type: square, hz: 18, depth: 0.85 }
+
+  # ---- 油门 → R2 柔性渐进弹簧手感 --------------------------------------
+  # 前段轻盈易于细致控油，后段饱满回弹，长赛段手指不疲劳
   - name: r2-throttle
     when: 'has("throttle")'
     target: r2
@@ -100,59 +163,136 @@ rules:
     priority: 10
     params:
       start: "0"
-      force: "clamp(10 + 120 * throttle + 60 * smoothstep(0.65, 1, throttle), 0, 255)"
+      force: "clamp(curve(throttle, 0.0, 8.0, 0.15, 25.0, 0.60, 85.0, 1.0, 150.0), 0, 255)"
 
-  # ---- 前悬阻尼速度 → 左音圈：碎石/搓板路的高频纹理 --------------------
+  # ---- 发动机红线换挡转速回馈 → 右马达高频轻震 ------------------------
+  # 逼近 8000rpm 红线时给予细腻高频震感，提示最佳升挡时机
+  - name: engine-redline-vibe
+    when: 'rpm > 7100'
+    target: rumble_right
+    priority: 25
+    value: "clamp(120 * (rpm - 7100) / 900, 0, 140)"
+    modulate: { type: sine, hz: 60, depth: 0.65 }
+
+  # ======================================================================
+  # 2. 砂石路面与悬挂细节：立体声双音圈（Stereo Voice Coils）
+  # ======================================================================
+
+  # ---- 前悬阻尼速度 → 左音圈：前轮砂石路面高频颗粒 --------------------
   - name: road-front-coil
-    when: 'has("damper_front") && damper_front > 0.02'
+    when: 'damper_front > 0.02 && speed > 5'
     target: haptic_left
     priority: 20
-    value: "clamp(220 * smoothstep(0.02, 0.35, damper_front), 0, 200)"
-    modulate: { type: sine, hz: 46, depth: 0.6 }
+    value: "clamp(240 * smoothstep(0.02, 0.35, damper_front), 0, 210)"
+    modulate: { type: sine, hz: 52, depth: 0.60 }
 
-  # ---- 后悬阻尼速度 → 右音圈：车尾拖拽/打滑 ---------------------------
+  # ---- 后悬阻尼速度 → 右音圈：后轴抓地拖拽与碎石飞溅 ------------------
+  # 与左音圈 52Hz 产生 12Hz 自然声学拍频，呈现出极其逼真的 3D 砂石颗粒感
   - name: road-rear-coil
-    when: 'has("damper_rear") && damper_rear > 0.02'
+    when: 'damper_rear > 0.02 && speed > 5'
     target: haptic_right
     priority: 20
-    value: "clamp(200 * smoothstep(0.02, 0.35, damper_rear), 0, 190)"
-    modulate: { type: sine, hz: 38, depth: 0.55 }
+    value: "clamp(220 * smoothstep(0.02, 0.35, damper_rear), 0, 195)"
+    modulate: { type: sine, hz: 40, depth: 0.55 }
 
-  # ---- 冲击（落地/撞石）→ 左右马达，短促 ---------------------------------
-  - name: impact-left
-    when: 'jolt > 0.45'
+  # ======================================================================
+  # 3. 铺装/砂石路面连续体感（HID 马达兜底与重量感）
+  # ======================================================================
+
+  # ---- 底盘垂直起伏 → 右马达细密微颤 ----------------------------------
+  - name: chassis-vibe-right
+    when: 'has("accel_vert") && speed > 8'
+    target: rumble_right
+    priority: 16
+    value: "clamp(6 + 45 * sqrt(max(absf(accel_vert), 0.001)) + 120 * absf(accel_vert), 0, 110)"
+    modulate: { type: sine, hz: 54, depth: 0.65 }
+
+  # ---- 粗糙路面颠簸 → 左大马达低频车身沉降 ----------------------------
+  - name: chassis-thrum-left
+    when: 'has("accel_vert") && speed > 8 && absf(accel_vert) > 0.15'
     target: rumble_left
-    priority: 40
-    value: "clamp(255 * smoothstep(0.45, 1.2, jolt), 0, 255)"
-    hold: 80ms
+    priority: 16
+    value: "clamp(25 + 180 * (absf(accel_vert) - 0.15), 0, 130)"
+    modulate: { type: sine, hz: 35, depth: 0.60 }
 
-  - name: impact-right
-    when: 'jolt > 0.45'
+  # ======================================================================
+  # 4. 车辆动力学：横向过弯载荷、钟摆甩尾与侧滑
+  # ======================================================================
+
+  # ---- 横向过弯加速度 → 右马达离心支撑力感 ----------------------------
+  - name: cornering-load
+    when: 'has("accel_lat") && absf(accel_lat) > 2.5'
     target: rumble_right
-    priority: 40
-    value: "clamp(255 * smoothstep(0.45, 1.2, jolt), 0, 255)"
-    hold: 80ms
+    priority: 22
+    value: "clamp(120 * smoothstep(2.5, 14.0, absf(accel_lat)), 0, 190)"
+    modulate: { type: sine, hz: 28, depth: 0.70 }
 
-  # ---- 横向加速度 → 右马达轻震：推头/甩尾的体感 ------------------------
-  - name: lateral-load
-    when: 'has("accel_lat") && absf(accel_lat) > 3'
+  # ---- 斯堪的纳维亚钟摆（Scandinavian Flick）瞬间甩尾瞬态脉冲 --------
+  # 车身横摆角加速度猛增（尾部骤然破抓或反打回正）时触发脆快警告
+  - name: snap-oversteer
+    when: 'has("accel_yaw") && absf(accel_yaw) > 1.8'
     target: rumble_right
-    priority: 20
-    value: "clamp(90 * smoothstep(3, 18, absf(accel_lat)), 0, 200)"
+    priority: 32
+    hold: 70ms
+    value: "clamp(160 * smoothstep(1.8, 4.5, absf(accel_yaw)), 0, 220)"
+    modulate: { type: square, hz: 32, depth: 0.75 }
 
-  # ---- 手刹 → 右马达 12Hz 脉冲 -----------------------------------------
-  - name: handbrake
-    when: 'has("handbrake") && handbrake > 0.5'
+  # ---- 四轮砂石侧滑（Drift Scrub）→ 左马达滑移磨削感 ------------------
+  - name: drift-slide
+    when: 'slide_speed > 2.0 && speed > 10'
+    target: rumble_left
+    priority: 24
+    value: "clamp(160 * smoothstep(2.0, 10.0, slide_speed), 0, 180)"
+    modulate: { type: sine, hz: 24, depth: 0.75 }
+
+  # ======================================================================
+  # 5. 飞坡着陆（Crest Jump Landing）与手刹
+  # ======================================================================
+
+  # ---- 跳跃落地冲击重锤（左大马达防撞击触底）---------------------------
+  - name: jump-landing-left
+    when: 'jolt > 0.45 || (has("accel_vert") && absf(accel_vert) > 12.0)'
+    target: rumble_left
+    priority: 50
+    hold: 120ms
+    value: "clamp(180 + 75 * smoothstep(0.45, 1.4, jolt), 0, 255)"
+    modulate: { type: square, hz: 16, depth: 0.60 }
+
+  # ---- 跳跃落地冲击重锤（右马达协同强化落地实感）-----------------------
+  - name: jump-landing-right
+    when: 'jolt > 0.45 || (has("accel_vert") && absf(accel_vert) > 12.0)'
     target: rumble_right
-    priority: 30
-    value: "150"
-    modulate: { type: sine, hz: 12, depth: 0.8 }
+    priority: 50
+    hold: 120ms
+    value: "clamp(165 + 75 * smoothstep(0.45, 1.4, jolt), 0, 245)"
+    modulate: { type: square, hz: 22, depth: 0.60 }
 
-  # ---- 灯条：刹车红、油门绿、逼近红线加蓝 -------------------------------
+  # ---- 跳跃落地音圈瞬态冲击 --------------------------------------------
+  - name: jump-landing-coil
+    when: 'jolt > 0.45 || (has("accel_vert") && absf(accel_vert) > 12.0)'
+    target: haptic_left
+    priority: 55
+    hold: 130ms
+    value: "255"
+
+  # ---- 手刹拉起抱死 → 右马达 14Hz 急促方波脉冲 -------------------------
+  - name: handbrake-lock
+    when: 'has("handbrake") && handbrake > 0.35'
+    target: rumble_right
+    priority: 38
+    hold: 60ms
+    value: "175"
+    modulate: { type: square, hz: 14, depth: 0.85 }
+
+  # ======================================================================
+  # 6. 交互式座舱仪表灯条
+  # ======================================================================
+
+  # 刹车红（拉手刹叠加琥珀橙）、油门绿、逼近红线电光蓝换挡提示
   - name: lightbar
     target: lightbar
     priority: 1
     params:
-      r: "clamp(255 * brake, 0, 255)"
+      r: 'clamp(255 * brake + (has("handbrake") && handbrake > 0.2 ? 180 : 0), 0, 255)'
       g: "clamp(255 * throttle, 0, 255)"
-      b: "clamp(200 * smoothstep(0.86, 0.97, rpm / 8000), 0, 255)"
+      b: "clamp(255 * smoothstep(0.85, 0.98, rpm / 8000), 0, 255)"

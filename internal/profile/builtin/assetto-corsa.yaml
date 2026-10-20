@@ -3,32 +3,35 @@
 # 链路：
 #   游戏（Proton 内的 Windows 进程）→ acpmf_physics 共享内存
 #     → ds5bridge.exe（同一 Proton 前缀内运行）→ UDP 127.0.0.1:9999
-#     → ds5d（Linux 原生）→ DualSense
+#     → ds5d（Linux 原生）→ DualSense 物理手柄
 #
-# 使用步骤：
-#   1) make build bridge                        # 编译 ds5d 与 Windows 桥
-#   2) ./bin/ds5d -profile assetto-corsa &      # 先起守护进程（会等数据）
-#   3) ./scripts/launch-bridge.sh <steam-appid>  # 把桥塞进游戏前缀
-#   4) 启动游戏，进赛道
+# 一键启停：
+#   ./scripts/ds5-acr.sh start           # 自动拉起 ds5d 并将桥注入 Proton 前缀
+#   ./scripts/ds5-acr.sh status          # 查看遥测与桥连接状态
+#   ./scripts/ds5-acr.sh stop            # 干净关闭并释放手柄
 #
-#   Steam AppID：Assetto Corsa = 244210
-#                ACC            = 805550
-#                AC Rally       = 3917090
-#
-# 偏移量与 acr-dualsense 项目在真实游戏中验证过的 `SPageFilePhysics` 一致
-# （见 internal/bridge/layout.go）。
+# 架构融合特色（全面融合拉力与直驱全套体验）：
+#   1. 踏板手感：
+#      - L2: 无助力赛车单回路液压刹车曲线（前段微空行程、中段陡增、后段 255 刚性液压墙）
+#      - R2: 柔性抗疲劳渐进油门弹簧曲线 + 6600+ 转高转速红线换挡微颤
+#   2. 直驱模拟器 FFB 降维力学：
+#      - 轮胎抓地力临界音圈高频啸叫（160Hz 摩擦极限微颤）
+#      - 推头失抓松脱警示（Understeer Drop 24Hz 脉冲）
+#   3. 立体声双音圈 3D 砂石颗粒：
+#      - 左音圈 52Hz + 右音圈 40Hz（形成 12Hz 触觉声学拍频，逼真呈现砂石路面与底盘敲击）
+#   4. 车辆动力学与冲击防触底：
+#      - 四轮滑移磨削感（Slip Smoothstep）+ TC / ABS 独立方波脉冲
+#      - 飞坡落地与撞击重锤（左右马达 16Hz/22Hz 方波重拳，hold 130ms）
+#   5. 交互式座舱仪表灯条：
+#      - 油门绿、刹车赛车红、接近红线电光蓝换挡提示。
+
 name: assetto-corsa
 title: Assetto Corsa / ACC / AC Rally（共享内存桥，UDP 9999）
 description: |
   通过 Proton 前缀内的 ds5bridge.exe 读取 acpmf_physics：
-  刹车 → L2 阻力，油门 → R2 阻力，四轮打滑 → 左马达，
-  ABS 介入 → 右马达 14Hz 脉冲，TC 介入 → 右马达持续轻震，
-  高转速 → R2 细颗粒感（custom0 为原始转速）。
-  底盘垂直加速度（accel_g = accG[1]）驱动路肩细颗粒振动与撞击重锤，
-  tyreDirtyLevel（surface）驱动路外草地/砂石的粗糙震感。
-
-  细腻度提示：默认 125Hz 输出时，40Hz 以上的调幅已接近上限；
-  想要更细的颗粒感请用 `-rate 250` 启动（DS5 USB 支持 250Hz）。
+  无助力液压刹车 ＋ 渐进柔性油门，160Hz 直驱抓地力极限微颤与推头松脱，
+  立体声双音圈 52Hz/40Hz 砂石拍频纹理，底盘颠簸左右互补拍频，
+  ABS / TC 独立脉冲，飞坡落地重锤防触底与电光蓝红线换挡灯条。
 
 source:
   type: udp
@@ -38,20 +41,22 @@ source:
 
 safety:
   signal_ttl: 500ms
-  release: 300ms
+  release: 250ms
+  status_lightbar: true
 
-# 音圈触感（USB 音频 Ch3/4）。HID 马达只能表达「振幅 + 一个调幅频率」，
-# 路肩那种细密颗粒必须靠音圈。实测（fw 0x0110002a）可用 —— 前提是
-# HID 报告在空闲时不要声明 COMPATIBLE_VIBRATION/HAPTICS_SELECT，
-# 否则执行器被锁在 HID 引擎上、幅度 0，音频流会被忽略。
+# 双音圈触感输出（USB Audio 声卡 Ch3/4）
 haptics:
   target: auto
-  carrier_hz: 60
-  gain: 0.9
+  carrier_hz: 52
+  gain: 0.95
 
 rules:
-  # ---- 刹车 → L2 持续阻力 (支持 curve 自定义非线性曲线) ------------------
-  # 车手可自由修改 curve 拐点坐标，随心定制初段虚位、中段饱满度与触底刚性
+  # ======================================================================
+  # 1. 踏板力学：L2 无助力液压刹车 + R2 渐进油门
+  # ======================================================================
+
+  # ---- 刹车 → L2 无助力液压踏板刚度曲线 --------------------------------
+  # 前段微小空行程，中段踏板力线性陡增，后段坚挺刚性液压墙 (力矩 235~255)
   - name: l2-brake
     when: 'has("brake")'
     target: l2
@@ -59,9 +64,10 @@ rules:
     priority: 10
     params:
       start: "0"
-      force: "clamp(curve(brake, 0.0, 18.0, 0.08, 45.0, 0.65, 180.0, 1.0, 255.0), 0, 255)"
+      force: "clamp(curve(brake, 0.0, 18.0, 0.05, 36.0, 0.50, 160.0, 0.85, 235.0, 1.0, 255.0), 0, 255)"
 
-  # ---- 油门 → R2 持续阻力 ----------------------------------------------
+  # ---- 油门 → R2 柔性渐进弹簧手感 --------------------------------------
+  # 前段轻盈易于细致控油，后段饱满回弹，长赛段手指不疲劳
   - name: r2-throttle
     when: 'has("throttle")'
     target: r2
@@ -69,118 +75,142 @@ rules:
     priority: 10
     params:
       start: "0"
-      force: "clamp(8 + 92 * throttle, 0, 255)"
+      force: "clamp(curve(throttle, 0.0, 8.0, 0.15, 25.0, 0.60, 85.0, 1.0, 150.0), 0, 255)"
 
-  # ---- 车轮打滑 → 左马达 -----------------------------------------------
-  # AC 的 wheelSlip 是原始滑移量（实测 0.02~8.06），不是 0..1。
-  # 直接用 200*slip 会让左马达长期饱和在 255，把路肩纹理全部盖掉，
-  # 所以这里用 smoothstep 把 0.35~2.5 映射成 0~230 的渐变。
-  # 门槛 0.8：实测 p90 就有 0.32，拉力赛常态在滑，门槛太低会让左马达
-  # 长期灌满（这就是"傻震"的主因）。只有真正甩尾才进 0.8 以上。
-  - name: slip-rumble
-    when: "slip > 0.8"
-    target: rumble_left
-    priority: 20
-    value: "clamp(210 * smoothstep(0.8, 3.0, slip), 0, 210)"
-
-  # ---- ABS 介入 → 右马达脉冲 -------------------------------------------
-  - name: abs-pulse
-    when: "abs > 0.05"
-    target: rumble_right
-    priority: 30
-    value: "clamp(180 * abs, 0, 255)"
-    modulate: { type: sine, hz: 14, depth: 0.85 }
-
-  # ---- TC 介入 → 右马达持续轻震 ----------------------------------------
-  - name: tc-rumble
-    when: "tc > 0.05"
+  # ---- 发动机红线转速回馈 → 右马达高频轻震 ----------------------------
+  # custom0 为原始引擎转速，逼近红线时给予细腻微颤提示最佳升挡时机
+  - name: engine-redline-vibe
+    when: "custom0 > 6600"
     target: rumble_right
     priority: 25
-    value: "clamp(120 * tc, 0, 255)"
-
-  # ---- 高转速 → R2 颗粒感（custom0 = 原始 rpm） ------------------------
-  - name: engine-grain
-    when: "custom0 > 5500"
-    target: rumble_right
-    priority: 15
-    value: "clamp(80 * (custom0 - 5500) / 2500, 0, 255)"
-    modulate: { type: sine, hz: 45, depth: 0.5 }
+    value: "clamp(120 * (custom0 - 6600) / 1200, 0, 140)"
+    modulate: { type: sine, hz: 58, depth: 0.65 }
 
   # ======================================================================
-  # 赛车直驱模拟器 (Direct Drive FFB) 力矩降维与抓地力极限模拟
-  #
-  # 依托物理量：
-  #   - 前轮滑移：slip_fl, slip_fr (前轮滑移量，表征转向附着力)
-  #   - 横向载荷：lat_g (转弯横向加速度 G 值)
-  #   - 车辆航向：steer (方向盘转角)
-  #
-  # 体验特色：
-  #   1. 轮胎抓地力临界高频啸叫：在入弯达到临界附着力边缘时，音圈马达发出 160Hz 细密微颤；
-  #   2. 刹车抱死线性阻尼变化：随着刹车与滑移率增加阻尼加硬；
-  #   3. 推头力矩骤降 (Understeer Slip-Drop)：前轮失抓失速时，右马达释放推头松脱触感；
-  #   4. 曲线完全支持使用 curve(...) 与 scurve(...) 自定义插值拐点！
+  # 2. 直驱模拟器 (Direct Drive FFB) 力矩降维与极限抓地力
   # ======================================================================
 
   # ---- 轮胎抓地力临界音圈高频微颤 (Grip Boundary Vibration) -----------
-  # 模拟直驱方向盘在轮胎达到最大摩擦力极限时的物理高频嘶鸣微颤
+  # 模拟直驱方向盘在轮胎达到最大摩擦力极限边缘时的物理高频嘶鸣微颤 (160Hz)
   - name: dd-grip-limit-vibe
     when: 'has("lat_g") && absf(lat_g) > 0.35 && max(slip_fl, slip_fr) > 0.35 && max(slip_fl, slip_fr) < 1.4'
     target: haptic_left
     priority: 32
-    value: "clamp(210 * smoothstep(0.35, 0.85, max(slip_fl, slip_fr)), 0, 200)"
+    value: "clamp(220 * smoothstep(0.35, 0.85, max(slip_fl, slip_fr)), 0, 210)"
     modulate: { type: sine, hz: 160, depth: 0.75 }
 
-  # ---- 推头抓地力丧失 (Understeer Drop) 瞬间松脱与右马达警示 -----------
-  # 超过极限滑移（推头）后，力矩急剧软化，触发推头提示脉冲
+  # ---- 推头失抓力矩骤降 (Understeer Drop) 瞬间松脱与右马达警示 --------
+  # 超过极限滑移（推头）后，力矩急剧软化，触发 24Hz 方波松脱提示脉冲
   - name: dd-understeer-drop
     when: 'max(slip_fl, slip_fr) >= 1.4 && absf(lat_g) > 0.5'
     target: rumble_right
     priority: 35
     hold: 80ms
     value: "clamp(180 * smoothstep(1.4, 2.8, max(slip_fl, slip_fr)), 0, 220)"
-    modulate: { type: sine, hz: 24, depth: 0.8 }
+    modulate: { type: square, hz: 24, depth: 0.80 }
 
   # ======================================================================
-  # 路面细节：路肩 / 颠簸 / 撞击 / 路外
-  #
-  # 全部来自底盘垂直加速度 accG[1]（accel_g，单位 G）。
-  # 左大马达负责低频“压感”，右小马达负责高频“颗粒感”，两路给不同
-  # 的调幅频率，会形成拍频，听感/手感比单路细腻得多。
-  # absf(...) < 12 是防呆：万一 ACR 的结构偏移变了读到垃圾值，规则自动失效。
+  # 3. 辅助系统与滑移反馈 (ABS / TC / Wheel Slip)
   # ======================================================================
 
-  # ---- 铺装路面细颗粒：速度越快越明显 ---------------------------------
-  # 分工：右马达(小、高频)承担"细颗粒"，一直在但不刺耳；
-  #       左马达(大、低频)只在颠簸明显时加入，负责"重量感"。
-  # 两个马达给不同的调幅频率，会形成拍频，比同频叠加细腻得多。
-  # 实测 ACR 的底盘垂直加速度很小（巡航 p50≈0，p90≈0.04，砂石 0.05~0.2，
-  # 路肩 0.4~1.6，撞击 2~4），所以曲线要有很长的低端行程，不能早早饱和。
+  # ---- ABS 介入 → 右马达 15Hz 急促方波脉冲 -----------------------------
+  - name: abs-pulse
+    when: "abs > 0.05"
+    target: rumble_right
+    priority: 30
+    hold: 50ms
+    value: "clamp(190 * abs, 0, 255)"
+    modulate: { type: square, hz: 15, depth: 0.85 }
+
+  # ---- TC 牵引力控制介入 → 右马达平滑震颤 -----------------------------
+  - name: tc-rumble
+    when: "tc > 0.05"
+    target: rumble_right
+    priority: 22
+    value: "clamp(130 * tc, 0, 200)"
+    modulate: { type: sine, hz: 32, depth: 0.60 }
+
+  # ---- 车轮滑移与甩尾磨削 → 左马达 26Hz 滑移触感 ---------------------
+  # 归一化平滑映射，避免长时间饱和掩盖路面细节
+  - name: slip-rumble
+    when: "slip > 0.8"
+    target: rumble_left
+    priority: 20
+    value: "clamp(210 * smoothstep(0.8, 3.0, slip), 0, 210)"
+    modulate: { type: sine, hz: 26, depth: 0.70 }
+
+  # ======================================================================
+  # 4. 砂石与路面细节：立体声双音圈 3D 拍频 (Stereo Voice Coils)
+  # ======================================================================
+
+  # ---- 前轮悬挂阻尼速度 → 左音圈 52Hz 前桥细颗粒 ---------------------
+  - name: coil-texture-left
+    when: 'has("accel_g") && speed > 5'
+    target: haptic_left
+    priority: 18
+    value: "clamp(8 + 420 * absf(accel_g), 0, 180)"
+    modulate: { type: sine, hz: 52, depth: 0.60 }
+
+  # ---- 后轮抓地与碎石飞溅 → 右音圈 40Hz 后轴纹理 ---------------------
+  # 与左音圈 52Hz 产生 12Hz 自然声学拍频，呈现 3D 砂石敲击底盘颗粒
+  - name: coil-texture-right
+    when: 'has("accel_g") && speed > 5'
+    target: haptic_right
+    priority: 18
+    value: "clamp(6 + 380 * absf(accel_g), 0, 170)"
+    modulate: { type: sine, hz: 40, depth: 0.55 }
+
+  # ---- 路肩 / 搓板碎震：音圈瞬态高频冲击 -----------------------------
+  - name: coil-kerb-left
+    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    target: haptic_left
+    priority: 30
+    hold: 60ms
+    value: "clamp(150 + 70 * (absf(accel_g) - 0.35), 0, 255)"
+
+  - name: coil-kerb-right
+    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
+    target: haptic_right
+    priority: 30
+    hold: 60ms
+    value: "clamp(130 + 65 * (absf(accel_g) - 0.35), 0, 245)"
+
+  # ---- 撞击与防触底重锤：音圈满幅爆发 ---------------------------------
+  - name: coil-impact
+    when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
+    target: haptic_left
+    priority: 65
+    hold: 140ms
+    value: "255"
+
+  # ======================================================================
+  # 5. 底盘垂直载荷与路面体感 (HID 左右马达互补沉降)
+  # ======================================================================
+
+  # ---- 铺装路面细颗粒：右马达承担高频细密微颤 -------------------------
   - name: road-texture-right
     when: 'has("accel_g") && speed > 5'
     target: rumble_right
-    priority: 17
-    value: "clamp(5 + 60 * sqrt(max(absf(accel_g), 0.0001)) + 300 * absf(accel_g), 0, 130)"
-    modulate: { type: sine, hz: 53, depth: 0.65 }
+    priority: 16
+    value: "clamp(6 + 50 * sqrt(max(absf(accel_g), 0.0001)) + 260 * absf(accel_g), 0, 120)"
+    modulate: { type: sine, hz: 54, depth: 0.65 }
 
+  # ---- 粗糙路面颠簸：左大马达负责低频车身沉降重量感 -------------------
   - name: road-texture-left
     when: 'has("accel_g") && speed > 5 && absf(accel_g) > 0.12'
     target: rumble_left
-    priority: 17
-    value: "clamp(35 + 300 * (absf(accel_g) - 0.12), 0, 150)"
-    modulate: { type: sine, hz: 38, depth: 0.6 }
+    priority: 16
+    value: "clamp(30 + 260 * (absf(accel_g) - 0.12), 0, 140)"
+    modulate: { type: sine, hz: 35, depth: 0.60 }
 
-  # ---- 路肩 / 颠簸：高频颗粒，左右不同频率形成拍频 ---------------------
-  # 实测路肩尖峰 0.8~1.9，所以门槛从 0.5 降到 0.35（能抓住更轻的路肩），
-  # 基值 130→170、斜率 120→150；并且换成方波调幅：sine+depth0.85 的平均
-  # 幅度只有 57%，方波能让一半时间处于满幅，路肩的"碎震"感明显更硬。
-  # hold 70ms 保证一闪而过的路肩也能被感知（60Hz 数据下一帧只有 16ms）。
+  # ---- 路肩 / 颠簸：双马达方波碎震 (hold 70ms 保证瞬态感知) ----------
   - name: kerb-left
     when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
     target: rumble_left
     priority: 28
     hold: 70ms
     value: "clamp(170 + 150 * (absf(accel_g) - 0.35), 0, 235)"
-    modulate: { type: square, hz: 30, depth: 0.8 }
+    modulate: { type: square, hz: 30, depth: 0.80 }
 
   - name: kerb-right
     when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
@@ -188,85 +218,34 @@ rules:
     priority: 28
     hold: 70ms
     value: "clamp(155 + 140 * (absf(accel_g) - 0.35), 0, 220)"
-    modulate: { type: square, hz: 44, depth: 0.8 }
+    modulate: { type: square, hz: 44, depth: 0.80 }
 
-  # ---- 路外（草地 / 砂石）：持续粗糙 -----------------------------------
-  # 注意：ACR 实测 tyreDirtyLevel(carDamage 同样) 恒为 0，这两条规则在 ACR
-  # 里不会触发；它们在 AC / ACC 上有效。ACR 的路外颠簸请由上面的 accel_g
-  # 规则承担（草地本身就是连续的 accel_g 抖动）。
-  - name: off-track-left
-    when: 'has("surface") && surface > 0.2 && speed > 8'
-    target: rumble_left
-    priority: 24
-    value: "clamp(60 + 22 * surface, 0, 190)"
-    modulate: { type: sine, hz: 22, depth: 0.7 }
-
-  - name: off-track-right
-    when: 'has("surface") && surface > 0.2 && speed > 8'
-    target: rumble_right
-    priority: 24
-    value: "clamp(50 + 20 * surface, 0, 175)"
-    modulate: { type: sine, hz: 29, depth: 0.7 }
-
-  # ---- 撞击：两路同时重锤，方波让冲击更“实” --------------------------
-  # hold 让单帧尖峰至少保持 120ms，否则 60Hz 数据下一闪而过。
+  # ---- 飞坡落地与硬碰撞重锤：双马达方波重击 ---------------------------
   - name: impact-left
     when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
     target: rumble_left
     priority: 60
     hold: 130ms
-    value: "clamp(150 + 45 * (absf(accel_g) - 1.5), 0, 255)"
-    modulate: { type: square, hz: 18, depth: 0.55 }
+    value: "clamp(160 + 45 * (absf(accel_g) - 1.5), 0, 255)"
+    modulate: { type: square, hz: 16, depth: 0.55 }
 
   - name: impact-right
     when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
     target: rumble_right
     priority: 60
     hold: 130ms
-    value: "clamp(140 + 45 * (absf(accel_g) - 1.5), 0, 255)"
-    modulate: { type: square, hz: 23, depth: 0.55 }
+    value: "clamp(150 + 45 * (absf(accel_g) - 1.5), 0, 255)"
+    modulate: { type: square, hz: 22, depth: 0.55 }
 
-  # ---- 音圈：细颗粒纹理（HID 马达给体感，音圈给细节） ------------------
-  - name: coil-texture-left
-    when: 'has("accel_g") && speed > 5'
-    target: haptic_left
-    priority: 18
-    value: "clamp(8 + 420 * absf(accel_g), 0, 170)"
+  # ======================================================================
+  # 6. 交互式座舱仪表灯条
+  # ======================================================================
 
-  - name: coil-texture-right
-    when: 'has("accel_g") && speed > 5'
-    target: haptic_right
-    priority: 18
-    value: "clamp(5 + 380 * absf(accel_g), 0, 160)"
-
-  # 路肩：音圈给出真正的"碎"感，HID 马达同步给重量
-  - name: coil-kerb-left
-    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
-    target: haptic_left
-    priority: 30
-    hold: 60ms
-    value: "clamp(140 + 70 * (absf(accel_g) - 0.35), 0, 255)"
-
-  - name: coil-kerb-right
-    when: 'has("accel_g") && absf(accel_g) > 0.35 && absf(accel_g) < 30'
-    target: haptic_right
-    priority: 30
-    hold: 60ms
-    value: "clamp(120 + 65 * (absf(accel_g) - 0.35), 0, 245)"
-
-  # 撞击：音圈吃满，给低频"砰"
-  - name: coil-impact
-    when: 'has("accel_g") && absf(accel_g) > 1.5 && absf(accel_g) < 30'
-    target: haptic_left
-    priority: 65
-    hold: 140ms
-    value: "clamp(180 + 30 * (absf(accel_g) - 1.5), 0, 255)"
-
-  # ---- 灯条：刹车红、油门绿 --------------------------------------------
+  # 刹车赛车红、油门翠绿、接近红线电光蓝换挡提示
   - name: lightbar
     target: lightbar
     priority: 1
     params:
       r: "clamp(255 * brake, 0, 255)"
       g: "clamp(255 * throttle, 0, 255)"
-      b: "20"
+      b: "clamp(255 * smoothstep(0.85, 0.98, custom0 / 8000), 0, 255)"

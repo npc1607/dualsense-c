@@ -7,11 +7,12 @@
 
 ## 架构
 
-```
-物理 DS5 (evdev) ──EVIOCGRAB──► ds5vpad ──转发输入──► 虚拟 Xbox 360 手柄 ──► 游戏
-                                    │
-                                    └── 捕获 FF_RUMBLE ──UDP 9998──► source/ffb ──► ds5d
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/npc1607/dualsense-c/main/docs/ffb-virtual-pad.svg" alt="力反馈镜像与虚拟手柄架构" width="100%">
+</p>
+<p align="center">
+  <sub>（注：架构图源文件见 <a href="https://github.com/npc1607/dualsense-c/blob/main/docs/ffb-virtual-pad.excalidraw">docs/ffb-virtual-pad.excalidraw</a>，支持在 <a href="https://excalidraw.com">Excalidraw</a> 中导入编辑）</sub>
+</p>
 
 ## 用法
 

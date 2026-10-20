@@ -37,8 +37,10 @@ git clone --depth 1 "$URL" "$TMP/wiki" >/dev/null 2>&1 || {
 	exit 1
 }
 
-# 只同步我们管理的页面，保留 wiki 上其它内容
-cp "$SRC"/*.md "$TMP/wiki/"
+# 只同步我们管理的页面及配套图片资产，保留 wiki 上其它内容
+cp "$SRC"/*.md "$TMP/wiki/" 2>/dev/null || true
+cp "$SRC"/*.svg "$TMP/wiki/" 2>/dev/null || true
+cp "$SRC"/*.png "$TMP/wiki/" 2>/dev/null || true
 
 cd "$TMP/wiki"
 if git diff --quiet && git diff --cached --quiet && [ -z "$(git status --porcelain)" ]; then

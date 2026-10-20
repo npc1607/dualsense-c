@@ -24,19 +24,19 @@ make windows
 #   bin/hidprobe.exe   音圈报告变体硬件探测工具
 ```
 
-### Windows 已适配模块一览
+### 跨平台功能与验证进度一览
 
-| 功能 | Windows 实现机制 | 说明 |
-|---|---|---|
-| HID 硬件层（`internal/device`） | SetupAPI + `hid.dll` + `ReadFile`/`WriteFile` | 自适应扳机、马达、灯条、陀螺仪/加速度计/触控板/电量解析 |
-| 音频采集（`source/audio`） | 原生 WASAPI Loopback（`internal/wasapi`） | 默认直接通过 COM `IAudioClient` + `IAudioCaptureClient` 抓取系统回环音频（`float32le`），无需外部录音工具；亦支持通过 `command` 参数自定义（如 `ffmpeg`） |
-| 音圈输出（`sink/haptics`） | 原生 WASAPI 4 声道渲染（`internal/wasapi`） | 自动定位 DualSense USB 声卡端点，通过 `WAVEFORMATEXTENSIBLE`（48 kHz 4ch `s16le`，`SPEAKER_QUAD` `0x33` 掩码）向 Ch3/4 音圈直写 PCM |
-| 音圈直通（`passthrough`） | WASAPI Loopback → 25–180 Hz 带通 → WASAPI 4ch Render | 零外部依赖，把游戏原始低频谱实时送到左右音圈 |
-| 虚拟手柄（`internal/vpad`） | `ViGEmClient.dll` + ViGEmBus 驱动 | 创建虚拟 Xbox 360 手柄并转发物理 DualSense 输入，通过 `vigem_target_x360_register_notification` 原生回调捕获游戏力反馈 |
-| 力反馈镜像（`source/ffb`） | `ds5vpad.exe` → UDP `FFB1` → `ds5d.exe` | 比 Linux `uinput` 具备更完整的实时震动强度回调 |
-| AI 推理（`-tags onnx`） | `make build-windows-onnx` | 支持 Windows 宽字符模型路径（`wchar_t*`）与可配置 `ORT_WIN_DIR` / `MINGW_CC` |
-| 启动脚本（`scripts/ds5-acr.ps1`） | PowerShell 5.1+ | 原生管理 `ds5d.exe` 与 `ds5bridge.exe`（`start`/`stop`/`restart`/`bridge-restart`/`status`/`logs`） |
-| 诊断工具（`ffclient.exe` / `hidprobe.exe`） | `XInputSetState` / `internal/device` | 验证虚拟手柄震动链路与音圈 HID 报告标志位 |
+| 功能模块 | Linux 进度与实现 | Windows 进度与实现 | 测试与验证状态 | 说明 |
+|---|---|---|---|---|
+| HID 硬件层（`internal/device`） | [已完成] `/dev/hidraw*` | [已完成] SetupAPI + `hid.dll` | Linux 真机已验 + 跨平台编译 | 自适应扳机、马达、灯条、陀螺仪/加速度计/触控板/电量解析 |
+| 音频采集（`source/audio`） | [已完成] `parec` 读 PipeWire monitor | [已完成] 原生 WASAPI Loopback（`internal/wasapi`） | DSP/包络单测 + Linux 真机已验 / Windows 待长测 | 默认通过 COM `IAudioCaptureClient` 抓取系统回环音频（`float32le`），亦支持通过 `command` 参数自定义（如 `ffmpeg`） |
+| 音圈输出（`sink/haptics`） | [已完成] `pacat` 4 声道 PCM | [已完成] 原生 WASAPI 4 声道渲染（`internal/wasapi`） | 4 声道合成单测 + Linux 真机已验 / Windows 待长测 | 自动定位 DualSense USB 声卡端点，通过 `WAVEFORMATEXTENSIBLE`（48 kHz 4ch `s16le`，`SPEAKER_QUAD` `0x33` 掩码）向 Ch3/4 音圈直写 PCM |
+| 音圈直通（`passthrough`） | [已完成] `parec` → 带通 → `pacat` | [已完成] WASAPI Loopback → 25–180 Hz 带通 → WASAPI 4ch | 带通滤波单测 + Linux 真机已验 / Windows 待长测 | 零外部依赖，把游戏原始低频谱实时送到左右音圈 |
+| 虚拟手柄（`internal/vpad`） | [已完成] `/dev/uinput` 虚拟 Xbox 360 | [已完成] `ViGEmClient.dll` + ViGEmBus 驱动 | `XUSB_REPORT` 单测 + Linux 实测 / Windows 待真机验证 | 创建虚拟 Xbox 360 手柄并转发物理 DualSense 输入，通过 `vigem_target_x360_register_notification` 原生回调捕获游戏力反馈 |
+| 力反馈镜像（`source/ffb`） | [已完成] `ds5vpad` → UDP `FFB1` → `ds5d` | [已完成] `ds5vpad.exe` → UDP `FFB1` → `ds5d.exe` | 报文单测 + Linux 实测 / Windows 待真机验证 | Windows ViGEm 具备实时震动播放强度回调，无 Linux `uinput` upload-only 限制 |
+| AI 推理（`-tags onnx`） | [已完成] `make build-onnx` | [已完成] `make build-windows-onnx` | 报文单测 + YAMNet INT8 实测 | 支持 Windows 宽字符模型路径（`wchar_t*`）与可配置 `ORT_WIN_DIR` / `MINGW_CC` |
+| 启动脚本（`scripts/`） | [已完成] `scripts/ds5-acr.sh` | [已完成] `scripts/ds5-acr.ps1`（PowerShell 5.1+） | 脚本语法与流程校验 | 原生管理 `ds5d.exe` 与 `ds5bridge.exe`（`start`/`stop`/`restart`/`bridge-restart`/`status`/`logs`） |
+| 诊断工具（`ffclient` / `hidprobe`） | [已完成] evdev FF / `internal/device` | [已完成] `XInputSetState` / `internal/device` | 跨平台编译 + Linux 真机实测 | 验证虚拟手柄震动链路与音圈 HID 报告标志位 |
 
 ### 运行时可选前置条件
 

@@ -37,8 +37,9 @@
 - [故障排查](#故障排查)
 - [目录结构](#目录结构)
 - [协议参考](#协议参考)
-- [开发计划](#开发计划)
-  - [Windows 适配缺口](#windows-适配缺口)
+- [功能矩阵与开发进度](#功能矩阵与开发进度)
+  - [核心功能与跨平台进度矩阵](#核心功能与跨平台进度矩阵)
+  - [后续演进规划（Roadmap）](#后续演进规划roadmap)
 - [发行包组件说明](#发行包组件说明)
 - [许可证](#许可证)
 
@@ -656,63 +657,40 @@ profiles/                 用户自定义 Profile 目录
 
 ---
 
-## 开发计划
+## 功能矩阵与开发进度
 
-- [x] **Assetto Corsa / ACC / AC Rally**：提供 `ds5bridge` Proton 桥接支持与 `acshm` 解码器
-- [x] **全手柄传感器与状态接入**：陀螺仪与加速度计（6 轴）、触控板坐标、电量/充电状态，以及静音灯与玩家指示灯控制
-- [x] **充电呼吸灯与三角函数支持**：规则引擎内置 `sin` / `cos`，通用 Profile 自动支持充电淡蓝呼吸与满电常亮
-- [x] **高清音圈触感（Voice-Coil Haptics）**：`sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM 驱动左右音圈（`haptic_left` / `haptic_right` target），Linux（`pacat`）与 Windows（原生 WASAPI 4 声道 `SPEAKER_QUAD`）均已适配
-- [x] **力反馈镜像驱动（`source/ffb`）**：`ds5vpad` 创建虚拟 Xbox 360 手柄（Linux `uinput` / Windows `ViGEmBus`）并转发物理手柄输入，捕获游戏震动后经 UDP 9998 交给 `ds5d`
-- [x] **音频包络触感推断（`source/audio`）**：抓取系统回环音频（Linux `parec` / Windows 原生 WASAPI Loopback）→ 三段带通（bass/mid/loudness）包络，可直接驱动音圈或马达
-- [x] **音频 AI 事件与材质探测器原型（`source/audioai`）**：基于 YAMNet ONNX 模型实时推断水洼/铁板/木板/碎石材质与交火音效（[方案文档](docs/audio-ai-event-detection.md)）
-- [ ] **rFactor 2 / LMU、ETS2 / ATS**：基于桥接架构扩展共享内存布局解析
-- [ ] **iRacing 支持**：接入 iRacing 内存映射 SDK
-- [ ] **触控板虚拟机械齿轮刻度感 (Virtual Detents)**：电容坐标微分与音圈单周期脉冲结合，呈现拟真机械棘轮、换挡旋钮与关键帧吸附手感
-- [ ] **空间声学触觉雷达 (7.1声道)**：环绕声空间低延迟分解，为盲操与竞技提供空间指向性触觉
-- [ ] **枪械机械卡壳与战术排障模拟**：开火过热触发 R2 扳机物理硬性锁死，结合 6 轴 IMU 甩动检测拉栓解卡
-- [x] **全品类手柄伴生声学播报系统（Companion Audio Agent）**：通过 DualSense 前置扬声器（Ch1/Ch2）播放车队无线电、路书领航与战术预警，与 Ch3/Ch4 触觉音圈物理正交；支持声明式 `target: speak` / `target: radio` 规则与端侧小语言模型（Qwen2.5-0.5B）`ds5radio`
-- [x] **赛车直驱模拟器力矩降维模拟**：将专业 FFB 对齐力矩曲线降维映射至自适应阻力与音圈抓地力极限（详见 `wiki/Direct-Drive-FFB.md`）
-- [ ] **手感黑胶唱片与录制回放系统**：250Hz 控制时序录制与一键预设分发
-- [ ] **双人手柄力矩纠缠网络 (Haptic Tether)**：局域网物理力矩同步对抗与协同驾驶
-- [ ] **触控板多指手势识别**：支持双指滑动、捏合映射为虚拟轮盘/旋钮
-- [ ] **焦点窗口仲裁**：依据前台活跃窗口自动平滑切换 Profile
-- [ ] **遥测录制与回放（`ds5d replay`）**：支持数据录制，用于回归调试
+### 核心功能与跨平台进度矩阵
 
-> 完整前沿创新方案设计与可行性评估矩阵，详见专属规划方案：
-> 详细参见 **[DualSense 触觉人机交互前沿探索与高级规划方案 (docs/haptic-explorations.md)](docs/haptic-explorations.md)**
-
-### Windows 适配缺口
-
-代码层面已经跨平台的部分：HID 设备读写（`internal/device/hidraw_windows.go`）、
-输出报告构建、规则引擎、Profile、`trigger` / `udp` / `audio_ai`（UDP）数据源、
-`ds5bridge.exe`（本身就是 Windows 程序）。原先尚未适配的模块现已**全部完成适配**：
-
-| 功能 | 现状 | 原阻塞点 | 已落地的实现 |
-|---|---|---|---|
-| **音频采集**（`source/audio`） | [已支持] 原生 WASAPI Loopback | 原依赖 `parec` 读 PipeWire monitor | `internal/wasapi` 纯 Go COM `IAudioCaptureClient` 共享模式回环采集（`float32le`），亦保留 `command` 自定义覆盖 |
-| **音圈输出**（`sink/haptics`） | [已支持] 原生 WASAPI 4 声道渲染 | 原依赖 `pacat` 往 4 声道 sink 写 PCM | 自动匹配 DualSense 声卡端点，通过 `WAVEFORMATEXTENSIBLE`（48kHz 4ch `s16le`，`SPEAKER_QUAD` `0x33`）直写 Ch3/4 音圈 |
-| **音圈直通**（`haptics.mode: passthrough`） | [已支持] WASAPI 采集 + 4 声道输出 | 采集与输出双依赖（同上） | WASAPI Loopback → 25–180 Hz 带通滤波 → WASAPI 4 声道音圈输出 |
-| **AI 推理引擎**（`-tags onnx`） | [已支持] 支持交叉编译与原生构建 | `engine_onnx.go` 宽字符路径与 include 路径 | `_WIN32` 下 UTF-8 → `wchar_t*` 转换 + `ORT_WIN_DIR` / `MINGW_CC` 可配置 + `make build-windows-onnx` |
-| **虚拟手柄**（`internal/vpad`） | [已支持] ViGEmBus（`ViGEmClient.dll`） | 需要虚拟总线驱动 | 动态加载 `ViGEmClient.dll` 创建虚拟 Xbox 360 手柄，注册原生 rumble 通知回调（无 uinput upload-only 限制） |
-| **力反馈镜像**（`source/ffb`） | [已支持] 随 `ds5vpad.exe` 落地 | 依赖虚拟手柄 | `ds5vpad.exe` 捕获 ViGEm 震动回调并通过 `FFB1` UDP 报文推送至 `ds5d.exe` |
-| **一键启停脚本**（`scripts/ds5-acr.ps1`） | [已支持] PowerShell 版本 | 原仅有 bash/Unix 脚本 | 新增 `scripts/ds5-acr.ps1`，支持原生 Windows 下 `ds5d.exe` + `ds5bridge.exe` 启停与状态管理 |
-| **调试工具** `ffclient` / `hidprobe` | [已支持] Windows 原生支持 | 原依赖 evdev FF / hidraw | `ffclient.exe` 基于 `XInputSetState` 发送震动；`hidprobe.exe` 改用跨平台 `internal/device` 接口 |
-| **udev 规则** | — 不需要 | Windows 无 udev | 无需适配 |
-| **Valve 手柄音频延迟参数** | — 不需要 | `--latency-msec` 是 PipeWire 工具参数 | WASAPI 采用 20ms 共享模式缓冲周期与轮询写入 |
-
-> **零改动的兜底方案**：Windows 上仍可让探测器作为独立进程，通过 UDP 把
-> `surface_*` / `audio_*` 发给 `ds5d.exe`（`source/audio_ai` 线协议平台无关），
-> 不必把模型与音频采集塞进主进程。
+| 功能模块 | Linux 进度与实现 | Windows 进度与实现 | 测试与验证状态 | 核心说明 |
+|---|---|---|---|---|
+| **HID 设备读写**（`internal/device`） | [已完成] `/dev/hidraw*` | [已完成] SetupAPI + `hid.dll` | Linux 真机已验 + 跨平台编译 | 支持 USB（`0x02`）与蓝牙（`0x31` + CRC32）输出报告 |
+| **全手柄传感器与输入解析**（`internal/input`） | [已完成] 原生报告解析 | [已完成] 原生报告解析 | 单测全覆盖 + 真机已验 | 解析扳机、摇杆、全按键（含 Create/Options/L3/R3）、6 轴 IMU、触控板、电量与充电状态 |
+| **规则引擎与数学函数**（`internal/rules`） | [已完成] 平台无关 | [已完成] 平台无关 | 单测全覆盖 | 内置表达式解析、优先级仲裁、锁存衰减、`sin`/`cos` 及直驱力矩映射函数 |
+| **UDP 与共享内存遥测**（`source/udp` + `ds5bridge`） | [已完成] 原生 UDP + Proton 桥接 | [已完成] 原生 UDP + 原生 `ds5bridge.exe` | 单测覆盖 + AC/ACC/ACR/RBR 实测 | 覆盖 Forza、OutGauge（BeamNG/LFS）、Codemasters、RBR 及 AC/ACC/ACR 共享内存 |
+| **音频包络采集**（`source/audio`） | [已完成] `parec` 读 PipeWire monitor | [已完成] 原生 WASAPI Loopback（`internal/wasapi`） | DSP/包络单测 + Linux 真机已验 / Windows 待长测 | 三段级联带通（`bass`/`mid`/`loudness`）+ 瞬态 `onset` 检测；均支持 `command` 自定义覆盖 |
+| **高清音圈输出**（`sink/haptics` 合成模式） | [已完成] `pacat` 4 声道 PCM | [已完成] WASAPI 4 声道 `SPEAKER_QUAD` `0x33` | 4 声道合成单测 + Linux 真机已验 / Windows 待长测 | 向 DualSense USB 声卡 Ch3/4 写 48kHz PCM 驱动左右音圈，Ch1/2 扬声器保持静音 |
+| **游戏音频音圈直通**（`haptics.mode: passthrough`） | [已完成] `parec` → 带通 → `pacat` | [已完成] WASAPI Loopback → 带通 → WASAPI 4ch | 带通滤波单测 + Linux 真机已验 / Windows 待长测 | 25–180Hz 三阶带通滤波后把游戏低频波形直通左右音圈 |
+| **AI 音频事件与材质探测**（`source/audioai` + `-tags onnx`） | [已完成] `make build-onnx` + UDP 伴生源 | [已完成] `make build-windows-onnx` + `_WIN32` 宽字符路径 | 报文单测 + YAMNet INT8 实测 | 实时识别材质（水洼/铁板/木板/碎石）与战斗音效（枪声/爆炸/受击），支持进程内推理或独立进程 UDP 推送 |
+| **虚拟手柄与力反馈镜像**（`internal/vpad` + `source/ffb`） | [已完成] `/dev/uinput` 虚拟 Xbox 360 | [已完成] `ViGEmClient.dll` + ViGEmBus 驱动 | `XUSB_REPORT` 编码单测 + Linux `ffclient` 实测 / Windows 待真机验证 | 读取物理 DS5 并转发为虚拟 Xbox 360 手柄，捕获游戏震动后经 UDP 9998 转为 `ffb_left`/`ffb_right` |
+| **一键启停脚本**（`scripts/`） | [已完成] `scripts/ds5-acr.sh` | [已完成] `scripts/ds5-acr.ps1` | 脚本语法与流程校验 | 一键管理 `ds5d` 与 `ds5bridge.exe` 生命周期、状态巡检与日志查看 |
+| **诊断与自测工具**（`ffclient` / `hidprobe` / `bridgesim`） | [已完成] evdev FF / `internal/device` | [已完成] `XInputSetState` / `internal/device` | 跨平台编译 + Linux 真机实测 | 用于独立验证虚拟手柄震动链路、音圈 HID 标志位与共享内存数据流 |
+| **伴生声学播报与车队电台**（`ds5radio` + `internal/radio`） | [已完成] 扬声器独立输出 + 规则/LLM 驱动 | [已完成] 扬声器独立输出 + 规则/LLM 驱动 | 单元测试 + 本地仿真已验 | 通过 DualSense 前置扬声器（Ch1/2）播放电台/路书，与 Ch3/4 触觉音圈正交 |
 
 ---
 
-### Windows 适配路线
+### 后续演进规划（Roadmap）
 
-- [x] **P1** `internal/vpad` Windows 后端（ViGEmBus）：虚拟手柄 + FF 回调
-- [x] **P1** 音圈输出 Windows 后端（4 声道 WASAPI `SPEAKER_QUAD` 写入）
-- [x] **P2** 音频采集 Windows 后端（WASAPI loopback → `float32le`）
-- [x] **P2** `engine_onnx.go` 的 cgo 路径可配置 + `build-windows-onnx`
-- [x] **P3** `scripts/ds5-acr.ps1` 与 Windows 版调试工具（`ffclient.exe` / `hidprobe.exe`）
+| 规划特性 | 涉及模块 | 当前状态 | 方案概述 |
+|---|---|---|---|
+| **rFactor 2 / LMU、ETS2 / ATS、iRacing 遥测支持** | `cmd/ds5bridge` / `source/udp` | [规划中] | 扩展共享内存桥接结构与 iRacing 内存映射 SDK 解码器 |
+| **焦点窗口自动仲裁** | `cmd/ds5d` | [规划中] | 依据当前前台活跃游戏窗口自动平滑切换 Profile |
+| **遥测录制与回放（`ds5d replay`）** | `cmd/ds5d` / `source/sim` | [规划中] | 支持 250Hz 原始遥测与控制时序录制回放，用于离线回归调优与预设分享 |
+| **触控板多指手势与虚拟机械刻度感 (Virtual Detents)** | `internal/input` / `sink/haptics` | [探索中] | 电容坐标微分结合音圈单周期脉冲，模拟机械棘轮、换挡旋钮与多指手势轮盘 |
+| **空间声学触觉雷达 (7.1 声道)** | `source/audio` / `sink/haptics` | [探索中] | 环绕声多声道低延迟能量分解，提供左右方位指向性音圈触觉 |
+| **枪械机械卡壳与 6 轴甩动排障模拟** | `internal/rules` / `internal/input` | [探索中] | 开火过热触发 R2 扳机硬锁死，结合 6 轴 IMU 甩动加速度检测模拟拉栓解卡 |
+| **双人手柄力矩纠缠网络 (Haptic Tether)** | `source/udp` / `internal/rules` | [探索中] | 局域网双机物理力矩同步对抗与协同驾驶反馈 |
+
+> 完整前沿创新方案设计与可行性评估矩阵，详见 **[DualSense 触觉人机交互前沿探索与高级规划方案 (docs/haptic-explorations.md)](docs/haptic-explorations.md)**。
 
 ---
 

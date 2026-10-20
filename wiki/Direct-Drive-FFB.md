@@ -64,18 +64,14 @@
 
 ---
 
-## 今晚 ACR（Assetto Corsa Rally）实战测试指引
+## 验证与调优
 
-1. **启动守护进程**：
-   ```bash
-   ./bin/ds5d -profile assetto-corsa
-   ```
-2. **将桥接程序注入 ACR Proton 前缀（Steam AppID 3917090）**：
-   ```bash
-   ./scripts/launch-bridge.sh 3917090
-   ```
-3. **进赛道体验要点**：
-   - 进弯切弯：感受横向 G 值带来的自适应抗拒阻力（`curve A`）；
-   - 临界贴地：手心感知 160Hz 细密音圈微颤（`curve C`）；
-   - 刹车过猛入弯推头：阻力瞬间软化松脱（`curve B`）；
-   - 调车调感：随时打开 `internal/profile/builtin/assetto-corsa.yaml`，按需修改 `curve(...)` 坐标数值。
+```bash
+# 启动守护进程
+./bin/ds5d -profile assetto-corsa
+
+# 将桥接程序注入游戏 Proton 前缀（Steam AppID：AC 244210 / ACC 805550 / ACR 3917090）
+./scripts/launch-bridge.sh <appid>
+```
+
+如需微调曲线手感，直接调整 `internal/profile/builtin/assetto-corsa.yaml` 中的 `curve` 坐标点或 `smoothstep` 阈值即可。

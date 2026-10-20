@@ -37,8 +37,10 @@ git clone --depth 1 "$URL" "$TMP/wiki" >/dev/null 2>&1 || {
 	exit 1
 }
 
-# 只同步我们管理的页面及配套图片资产，保留 wiki 上其它内容
+# 同步公开文档并清理已废弃页面，排除内部 README.md
+rm -f "$TMP/wiki"/*.md
 cp "$SRC"/*.md "$TMP/wiki/" 2>/dev/null || true
+rm -f "$TMP/wiki/README.md"
 cp "$SRC"/*.svg "$TMP/wiki/" 2>/dev/null || true
 cp "$SRC"/*.png "$TMP/wiki/" 2>/dev/null || true
 

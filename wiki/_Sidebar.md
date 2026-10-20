@@ -12,7 +12,6 @@
 - [直驱模拟器 FFB (AC/ACR)](Direct-Drive-FFB)
 - [理查德·伯恩斯拉力赛 (RBR)](RBR)
 - [RBR 控制器二进制结构 (ACM)](RBR-ACM-Format)
-- [触觉前沿探索](Haptic-Explorations)
 - [Far Far West 实例](Far-Far-West)
 - [平台支持](Platform-Support)
 - [故障排查](Troubleshooting)

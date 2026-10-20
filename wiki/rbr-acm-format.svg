@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 870" width="100%" height="100%">
+  <defs>
+    <filter id="shadow" x="-3%" y="-3%" width="106%" height="106%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.06"/>
+    </filter>
+    <marker id="arrow-gray" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M 0 1.5 L 7.5 4.5 L 0 7.5 Z" fill="#495057" />
+    </marker>
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-weight: 800; fill: #0f172a; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 500; fill: #475569; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 19px; }
+      .card-sub { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; fill: #64748b; }
+      .card-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 14.5px; fill: #1e293b; }
+      .tag-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 12px; font-weight: 600; fill: #475569; }
+      .warn-text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13px; font-weight: 600; fill: #dc2626; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f8fafc" rx="16"/>
+
+  <!-- 顶部主副标题 -->
+  <g transform="translate(550, 48)" text-anchor="middle">
+    <text class="title" font-size="28" y="0">RBR 控制器配置文件 (pfsam.acm) 二进制结构</text>
+    <text class="subtitle" font-size="15" y="30">Richard Burns Rally 经典 DirectInput 设备识别与定长 12 字节绑定三元组布局</text>
+  </g>
+
+  <!-- ================= 1. 文件头部 Header ================= -->
+  <g transform="translate(50, 130)" filter="url(#shadow)">
+    <rect width="1000" height="180" rx="14" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+    <text class="card-title" x="30" y="38" fill="#1d4ed8">1. 文件头部 Header (20 字节, 0x00..0x13)</text>
+    <text class="card-sub" x="30" y="60">固定魔数识别与元数据总量定义 (全部采用 32 位小端无符号整数 uint32_t)</text>
+    <line x1="30" y1="74" x2="970" y2="74" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="4,4"/>
+    
+    <g class="card-body" transform="translate(30, 102)">
+      <text y="0">• <tspan font-family="ui-monospace, monospace" font-weight="700">0x00..0x03</tspan> : PAMA 魔数标识 (char[4], ASCII "PAMA", 0x50414D41)</text>
+      <text y="28">• <tspan font-family="ui-monospace, monospace" font-weight="700">0x04..0x07</tspan> : 引擎格式版本号 (uint32_t, 默认 0x00000300)</text>
+      <text y="56">• <tspan font-family="ui-monospace, monospace" font-weight="700">0x08..0x0B</tspan> : 配置套数 Config Count (uint32_t = 1)   |   <tspan font-family="ui-monospace, monospace" font-weight="700">0x0C..0x0F</tspan> : 设备总数 Device Count (uint32_t = 3)   |   <tspan font-family="ui-monospace, monospace" font-weight="700">0x10..0x13</tspan> : 绑定项总数 (uint32_t = N)</text>
+    </g>
+  </g>
+
+  <!-- 连线 1 -> 2 -->
+  <line x1="550" y1="310" x2="550" y2="355" stroke="#64748b" stroke-width="2.2" marker-end="url(#arrow-gray)"/>
+  <rect x="560" y="322" width="180" height="22" rx="4" fill="#ffffff" stroke="#cbd5e1"/>
+  <text class="tag-text" x="570" y="337">依据 Device Count 展开设备表</text>
+
+  <!-- ================= 2. 设备描述表 Device Table ================= -->
+  <g transform="translate(50, 360)" filter="url(#shadow)">
+    <rect width="1000" height="190" rx="14" fill="#ffffff" stroke="#16a34a" stroke-width="2"/>
+    <text class="card-title" x="30" y="38" fill="#15803d">2. 设备描述表 Device Table (Device Count × 20 字节, 0x14 起)</text>
+    <text class="card-sub" x="30" y="60">记录每个接入设备的 Windows DirectInput 实例 GUID 与 DEST 4 字节固定标识</text>
+    <line x1="30" y1="74" x2="970" y2="74" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="4,4"/>
+    
+    <g class="card-body" transform="translate(30, 102)">
+      <text y="0">• <tspan font-family="ui-monospace, monospace" font-weight="700">0x14..0x27 (Device[0])</tspan> : 设备实例 GUID (16 字节) + DEST 固定标签 (4 字节) ── 主力手柄 / 方向盘</text>
+      <text y="28">• <tspan font-family="ui-monospace, monospace" font-weight="700">0x28..0x3B (Device[1])</tspan> : 设备实例 GUID (16 字节) + DEST 固定标签 (4 字节) ── 第二手柄 / 虚拟手柄</text>
+      <text y="56">• <tspan font-family="ui-monospace, monospace" font-weight="700">0x3C..0x4F (Device[2])</tspan> : 设备实例 GUID (16 字节) + DEST 固定标签 (4 字节) ── 系统键盘 GUID</text>
+    </g>
+  </g>
+
+  <!-- 连线 2 -> 3 -->
+  <line x1="550" y1="550" x2="550" y2="595" stroke="#64748b" stroke-width="2.2" marker-end="url(#arrow-gray)"/>
+  <rect x="560" y="562" width="230" height="22" rx="4" fill="#ffffff" stroke="#cbd5e1"/>
+  <text class="tag-text" x="570" y="577">0x0000 填充对齐 ──► 绑定三元组数组</text>
+
+  <!-- ================= 3. 绑定数据块 Bindings Block ================= -->
+  <g transform="translate(50, 600)" filter="url(#shadow)">
+    <rect width="1000" height="235" rx="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <text class="card-title" x="30" y="38" fill="#6d28d9">3. 绑定记录三元组数组 Bindings Block (Binding Count × 12 字节)</text>
+    <text class="card-sub" x="30" y="60">每条绑定记录均为定长 12 字节结构体：struct { uint32_t device_id; uint32_t input_code; uint32_t function_id; }</text>
+    <line x1="30" y1="74" x2="970" y2="74" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="4,4"/>
+    
+    <g class="card-body" transform="translate(30, 102)">
+      <text y="0">• <tspan font-family="ui-monospace, monospace" font-weight="700">Device ID (4 字节)</tspan>   : 引用设备描述表的索引 (0=第一设备, 1=第二设备, 2=键盘)</text>
+      <text y="28">• <tspan font-family="ui-monospace, monospace" font-weight="700">Input Code (4 字节)</tspan>  : 输入编码 (高 16 位为类型: 0x02=模拟轴 Axis, 0x04=数字按键 Key; 低 16 位为扫描码)</text>
+      <text y="56">• <tspan font-family="ui-monospace, monospace" font-weight="700">Function ID (4 字节)</tspan> : 目标功能定义 (0=Steering转向, 3=Throttle独立油门, 4=合并轴, 5=Footbrake独立刹车, 6=Handbrake手刹)</text>
+      <text y="86" class="warn-text">• 提示：游戏退出时强制按 pfsam.acm 结构写盘；设备顺序或 GUID 错位会导致整个键位映射错乱</text>
+    </g>
+  </g>
+
+</svg>

@@ -16,7 +16,7 @@ MSG="${1:-docs(wiki): sync pages}"
 
 [ -d "$SRC" ] || { echo "missing $SRC" >&2; exit 1; }
 
-URL="https://github.com/$REPO_SLUG.wiki.git"
+URL="${DS5_WIKI_URL:-git@github.com:$REPO_SLUG.wiki.git}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

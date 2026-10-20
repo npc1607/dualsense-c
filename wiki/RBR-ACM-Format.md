@@ -6,36 +6,12 @@
 
 ## 1. 总体文件布局图表
 
-```
-+-------------------------------------------------------------------------+
-|                              文件头部 Header                            |
-| 0x00..0x03 : "PAMA" 魔数 (4 字节 ASCII)                                |
-| 0x04..0x07 : 格式版本号 (uint32_t, 默认 0x00000300)                     |
-| 0x08..0x0B : 配置套数 Config Count (uint32_t)                           |
-| 0x0C..0x0F : 设备总数 Device Count (uint32_t)                           |
-| 0x10..0x13 : 绑定记录总数 Binding Count (uint32_t)                      |
-+-------------------------------------------------------------------------+
-|                           设备描述表 Device Table                        |
-| 每个设备块包含 16 字节 DirectInput GUID + 4 字节 "DEST" 标记            |
-| 0x14..0x23 : Device[0] GUID (16 bytes)                                  |
-| 0x24..0x27 : "DEST" 标签 (4 bytes)                                      |
-| 0x28..0x37 : Device[1] GUID (16 bytes)                                  |
-| 0x38..0x3B : "DEST" 标签 (4 bytes)                                      |
-| 0x3C..0x4B : Device[2] GUID (16 bytes) (通常为键盘 GUID)                |
-| 0x4C..0x4F : "DEST" 标签 (4 bytes)                                      |
-+-------------------------------------------------------------------------+
-|                           绑定项数据 Bindings Block                      |
-| 0x42..0x43 : 2 字节填充 (0x0000)                                        |
-| 随后是 N 个定长 12 字节的绑定三元组 (DeviceID, InputCode, FunctionID)     |
-| +------------+-----------------------+---------------+                  |
-| | DeviceID   | InputCode (Type+Code) | FunctionID    |                  |
-| | (uint32_t) | (uint32_t)            | (uint32_t)    |                  |
-| +------------+-----------------------+---------------+                  |
-| Entry 0 (12 bytes)                                                      |
-| Entry 1 (12 bytes)                                                      |
-| ...                                                                     |
-+-------------------------------------------------------------------------+
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/npc1607/dualsense-c/main/docs/rbr-acm-format.svg" alt="RBR 控制器配置文件 (pfsam.acm) 二进制结构" width="100%">
+</p>
+<p align="center">
+  <sub>（注：架构图源文件见 <a href="https://github.com/npc1607/dualsense-c/blob/main/docs/rbr-acm-format.excalidraw">docs/rbr-acm-format.excalidraw</a>，支持在 <a href="https://excalidraw.com">Excalidraw</a> 中导入编辑）</sub>
+</p>
 
 ---
 

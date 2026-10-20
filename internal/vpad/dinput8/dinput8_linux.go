@@ -18,17 +18,18 @@ import (
 // Linux evdev button codes for gamepads and joysticks.
 // Wine / Proton's winebus.sys maps BTN_GAMEPAD (0x130..) directly to DirectInput 8
 // buttons in standard order:
-//   0x130 (BTN_SOUTH / Cross)    -> DirectInput Button 1
-//   0x131 (BTN_EAST  / Circle)   -> DirectInput Button 2
-//   0x133 (BTN_WEST  / Square)   -> DirectInput Button 3
-//   0x134 (BTN_NORTH / Triangle) -> DirectInput Button 4
-//   0x136 (BTN_TL    / L1)       -> DirectInput Button 5
-//   0x137 (BTN_TR    / R1)       -> DirectInput Button 6
-//   0x13a (BTN_SELECT/ Share)    -> DirectInput Button 7
-//   0x13b (BTN_START / Options)  -> DirectInput Button 8
-//   0x13d (BTN_THUMBL/ L3)       -> DirectInput Button 9
-//   0x13e (BTN_THUMBR/ R3)       -> DirectInput Button 10
-//   0x13c (BTN_MODE  / PS)       -> DirectInput Button 11
+//
+//	0x130 (BTN_SOUTH / Cross)    -> DirectInput Button 1
+//	0x131 (BTN_EAST  / Circle)   -> DirectInput Button 2
+//	0x133 (BTN_WEST  / Square)   -> DirectInput Button 3
+//	0x134 (BTN_NORTH / Triangle) -> DirectInput Button 4
+//	0x136 (BTN_TL    / L1)       -> DirectInput Button 5
+//	0x137 (BTN_TR    / R1)       -> DirectInput Button 6
+//	0x13a (BTN_SELECT/ Share)    -> DirectInput Button 7
+//	0x13b (BTN_START / Options)  -> DirectInput Button 8
+//	0x13d (BTN_THUMBL/ L3)       -> DirectInput Button 9
+//	0x13e (BTN_THUMBR/ R3)       -> DirectInput Button 10
+//	0x13c (BTN_MODE  / PS)       -> DirectInput Button 11
 const (
 	btnSouth  = 0x130 // Cross / ×
 	btnEast   = 0x131 // Circle / ○

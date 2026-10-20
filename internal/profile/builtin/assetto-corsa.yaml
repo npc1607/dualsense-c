@@ -5,23 +5,24 @@
 #     → ds5bridge.exe（同一 Proton 前缀内运行）→ UDP 127.0.0.1:9999
 #     → ds5d（Linux 原生）→ DualSense 物理手柄
 #
-# 一键启停：
-#   ./scripts/ds5-acr.sh start           # 自动拉起 ds5d 并将桥注入 Proton 前缀
+# 一键启停（两段式）：
+#   ./scripts/ds5-acr.sh start           # 启动 Linux 原生 ds5d 守护进程
+#   在 Steam 中启动 ACR 并进入赛道
+#   ./scripts/ds5-acr.sh bridge          # 游戏启动后注入桥连接共享内存
 #   ./scripts/ds5-acr.sh status          # 查看遥测与桥连接状态
 #   ./scripts/ds5-acr.sh stop            # 干净关闭并释放手柄
 #
-# 架构融合特色（全面融合拉力与直驱全套体验）：
-#   1. 踏板手感：
-#      - L2: 无助力赛车单回路液压刹车曲线（前段微空行程、中段陡增、后段 255 刚性液压墙）
-#      - R2: 柔性抗疲劳渐进油门弹簧曲线 + 6600+ 转高转速红线换挡微颤
-#   2. 直驱模拟器 FFB 降维力学：
+# 架构平衡与融合特色（左手刹车/右手油门 + 对称机体共振）：
+#   1. 生理直觉分离：
+#      - 左手掌：L2 无助力液压踏板刚性墙 ＋ ABS 刹车防抱死 15Hz 急促方波打手感
+#      - 右手掌：R2 渐进油门弹簧 ＋ TC 牵引力控制打滑平滑震颤 ＋ 直驱推头松脱警告
+#   2. 对称动力共振：
+#      - 发动机红线换挡转速（6600+ RPM）采用双马达对称 58Hz 微颤，告别单侧疲劳
+#   3. 双手均衡路面拍频：
+#      - 消除右马达无条件底噪傻震，平衡左右路面颠簸起步门槛（0.04/0.06 G），砂石起伏时左右拍频交替沉降
+#   4. 直驱模拟器 FFB 降维力学：
 #      - 轮胎抓地力临界音圈高频啸叫（160Hz 摩擦极限微颤）
-#      - 推头失抓松脱警示（Understeer Drop 24Hz 脉冲）
-#   3. 立体声双音圈 3D 砂石颗粒：
-#      - 左音圈 52Hz + 右音圈 40Hz（形成 12Hz 触觉声学拍频，逼真呈现砂石路面与底盘敲击）
-#   4. 车辆动力学与冲击防触底：
-#      - 四轮滑移磨削感（Slip Smoothstep）+ TC / ABS 独立方波脉冲
-#      - 飞坡落地与撞击重锤（左右马达 16Hz/22Hz 方波重拳，hold 130ms）
+#      - 飞坡落地与硬碰撞重锤（左右马达 16Hz/22Hz 方波重拳，hold 130ms）
 #   5. 交互式座舱仪表灯条：
 #      - 油门绿、刹车赛车红、接近红线电光蓝换挡提示。
 
@@ -29,9 +30,10 @@ name: assetto-corsa
 title: Assetto Corsa / ACC / AC Rally（共享内存桥，UDP 9999）
 description: |
   通过 Proton 前缀内的 ds5bridge.exe 读取 acpmf_physics：
-  无助力液压刹车 ＋ 渐进柔性油门，160Hz 直驱抓地力极限微颤与推头松脱，
-  立体声双音圈 52Hz/40Hz 砂石拍频纹理，底盘颠簸左右互补拍频，
-  ABS / TC 独立脉冲，飞坡落地重锤防触底与电光蓝红线换挡灯条。
+  无助力液压刹车 ＋ 渐进柔性油门，左手 ABS 弹手 / 右手 TC 牵引力直觉分离，
+  双侧对称 58Hz 红线引擎微颤，160Hz 直驱抓地力极限微颤与推头松脱，
+  立体声双音圈 52Hz/40Hz 砂石拍频纹理，底盘颠簸左右均衡沉降，
+  飞坡落地重锤防触底与电光蓝红线换挡灯条。
 
 source:
   type: udp
@@ -77,17 +79,55 @@ rules:
       start: "0"
       force: "clamp(curve(throttle, 0.0, 8.0, 0.15, 25.0, 0.60, 85.0, 1.0, 150.0), 0, 255)"
 
-  # ---- 发动机红线转速回馈 → 右马达高频轻震 ----------------------------
-  # custom0 为原始引擎转速，逼近红线时给予细腻微颤提示最佳升挡时机
-  - name: engine-redline-vibe
+  # ======================================================================
+  # 2. 发动机对称共振：6600+ 转红线微颤（双侧平衡）
+  # ======================================================================
+
+  - name: engine-redline-left
+    when: "custom0 > 6600"
+    target: rumble_left
+    priority: 25
+    value: "clamp(100 * (custom0 - 6600) / 1200, 0, 120)"
+    modulate: { type: sine, hz: 58, depth: 0.65 }
+
+  - name: engine-redline-right
     when: "custom0 > 6600"
     target: rumble_right
     priority: 25
-    value: "clamp(120 * (custom0 - 6600) / 1200, 0, 140)"
+    value: "clamp(100 * (custom0 - 6600) / 1200, 0, 120)"
     modulate: { type: sine, hz: 58, depth: 0.65 }
 
   # ======================================================================
-  # 2. 直驱模拟器 (Direct Drive FFB) 力矩降维与极限抓地力
+  # 3. 生理直觉分离：左手 ABS 刹车抱死 + 右手 TC 牵引力控制
+  # ======================================================================
+
+  # ---- ABS 介入 → 左手马达 15Hz 急促方波脉冲 (直觉联动 L2 刹车) --------
+  - name: abs-pulse-left
+    when: "abs > 0.05"
+    target: rumble_left
+    priority: 30
+    hold: 50ms
+    value: "clamp(190 * abs, 0, 255)"
+    modulate: { type: square, hz: 15, depth: 0.85 }
+
+  # ---- TC 牵引力控制介入 → 右手马达平滑震颤 (直觉联动 R2 油门) --------
+  - name: tc-rumble-right
+    when: "tc > 0.05"
+    target: rumble_right
+    priority: 22
+    value: "clamp(130 * tc, 0, 200)"
+    modulate: { type: sine, hz: 32, depth: 0.60 }
+
+  # ---- 车轮滑移与甩尾磨削 → 左马达 26Hz 滑移触感 ---------------------
+  - name: slip-rumble
+    when: "slip > 0.6"
+    target: rumble_left
+    priority: 20
+    value: "clamp(200 * smoothstep(0.6, 2.5, slip), 0, 200)"
+    modulate: { type: sine, hz: 26, depth: 0.70 }
+
+  # ======================================================================
+  # 4. 直驱模拟器 (Direct Drive FFB) 力矩降维与极限抓地力
   # ======================================================================
 
   # ---- 轮胎抓地力临界音圈高频微颤 (Grip Boundary Vibration) -----------
@@ -110,37 +150,7 @@ rules:
     modulate: { type: square, hz: 24, depth: 0.80 }
 
   # ======================================================================
-  # 3. 辅助系统与滑移反馈 (ABS / TC / Wheel Slip)
-  # ======================================================================
-
-  # ---- ABS 介入 → 右马达 15Hz 急促方波脉冲 -----------------------------
-  - name: abs-pulse
-    when: "abs > 0.05"
-    target: rumble_right
-    priority: 30
-    hold: 50ms
-    value: "clamp(190 * abs, 0, 255)"
-    modulate: { type: square, hz: 15, depth: 0.85 }
-
-  # ---- TC 牵引力控制介入 → 右马达平滑震颤 -----------------------------
-  - name: tc-rumble
-    when: "tc > 0.05"
-    target: rumble_right
-    priority: 22
-    value: "clamp(130 * tc, 0, 200)"
-    modulate: { type: sine, hz: 32, depth: 0.60 }
-
-  # ---- 车轮滑移与甩尾磨削 → 左马达 26Hz 滑移触感 ---------------------
-  # 归一化平滑映射，避免长时间饱和掩盖路面细节
-  - name: slip-rumble
-    when: "slip > 0.8"
-    target: rumble_left
-    priority: 20
-    value: "clamp(210 * smoothstep(0.8, 3.0, slip), 0, 210)"
-    modulate: { type: sine, hz: 26, depth: 0.70 }
-
-  # ======================================================================
-  # 4. 砂石与路面细节：立体声双音圈 3D 拍频 (Stereo Voice Coils)
+  # 5. 砂石与路面细节：立体声双音圈 3D 拍频 (Stereo Voice Coils)
   # ======================================================================
 
   # ---- 前轮悬挂阻尼速度 → 左音圈 52Hz 前桥细颗粒 ---------------------
@@ -184,23 +194,23 @@ rules:
     value: "255"
 
   # ======================================================================
-  # 5. 底盘垂直载荷与路面体感 (HID 左右马达互补沉降)
+  # 6. 底盘垂直载荷与路面体感 (左右均衡起步门槛)
   # ======================================================================
 
-  # ---- 铺装路面细颗粒：右马达承担高频细密微颤 -------------------------
+  # ---- 铺装路面细颗粒：右马达承担高频细颗粒纹理 (轻柔细腻，不过激) --------
   - name: road-texture-right
     when: 'has("accel_g") && speed > 5'
     target: rumble_right
     priority: 16
-    value: "clamp(6 + 50 * sqrt(max(absf(accel_g), 0.0001)) + 260 * absf(accel_g), 0, 120)"
+    value: "clamp(4 + 35 * sqrt(max(absf(accel_g), 0.0001)) + 240 * absf(accel_g), 0, 110)"
     modulate: { type: sine, hz: 54, depth: 0.65 }
 
-  # ---- 粗糙路面颠簸：左大马达负责低频车身沉降重量感 -------------------
+  # ---- 粗糙路面颠簸：左大马达负责低频车身沉降重量感 (门槛 0.06G 均衡响应) ------
   - name: road-texture-left
-    when: 'has("accel_g") && speed > 5 && absf(accel_g) > 0.12'
+    when: 'has("accel_g") && speed > 5 && absf(accel_g) > 0.06'
     target: rumble_left
     priority: 16
-    value: "clamp(30 + 260 * (absf(accel_g) - 0.12), 0, 140)"
+    value: "clamp(25 + 240 * (absf(accel_g) - 0.06), 0, 130)"
     modulate: { type: sine, hz: 35, depth: 0.60 }
 
   # ---- 路肩 / 颠簸：双马达方波碎震 (hold 70ms 保证瞬态感知) ----------
@@ -238,7 +248,7 @@ rules:
     modulate: { type: square, hz: 22, depth: 0.55 }
 
   # ======================================================================
-  # 6. 交互式座舱仪表灯条
+  # 7. 交互式座舱仪表灯条
   # ======================================================================
 
   # 刹车赛车红、油门翠绿、接近红线电光蓝换挡提示

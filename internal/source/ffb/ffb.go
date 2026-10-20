@@ -2,25 +2,15 @@
 // exposes it as signals.
 //
 // A game only sends rumble to the pad it is talking to, so the capture has to
-// happen in the virtual-pad backend (see internal/vpad and cmd/ds5vpad). This
-// package is deliberately just a wire protocol: the backend publishes two bytes
-// per update, and any future platform backend can feed the same port.
-//
-// Packet layout (little endian):
-//
-//	0  magic  "FFB1" (uint32 0x31424646)
-//	4  left   0..255
-//	5  right  0..255
-//	6  _      reserved
-//	7  _      reserved
-//	8  seq    uint32, optional monotonic counter
+// happen in the virtual-pad backend (see internal/vpad and cmd/ds5vpad).
+// Communication uses the high-performance, ultra-low latency event-driven
+// vpad/ipc protocol (< 50 microseconds latency, zero polling ticker lag).
 package ffb
 
 import (
 	"context"
 	"encoding/binary"
-	"errors"
-	"fmt"
+	"io"
 	"log"
 	"net"
 	"time"
@@ -28,79 +18,87 @@ import (
 	"github.com/npc1607/dualsense-c/internal/profile"
 	"github.com/npc1607/dualsense-c/internal/signal"
 	"github.com/npc1607/dualsense-c/internal/source"
+	"github.com/npc1607/dualsense-c/internal/vpad/ipc"
 )
 
 func init() { source.Register("ffb", New) }
 
-// Magic identifies a force-feedback datagram.
-const Magic uint32 = 0x31424646 // "FFB1"
+// Magic identifies a force-feedback protocol frame ("FFB1").
+const Magic = ipc.Magic
 
-// DefaultListen is where ds5vpad publishes by default.
-const DefaultListen = "127.0.0.1:9998"
+// DefaultListen is the default IPC endpoint.
+const DefaultListen = ipc.DefaultEndpoint
 
-// PacketBytes is the fixed datagram size.
-const PacketBytes = 12
+// PacketBytes is the fixed wire frame size (12 bytes).
+const PacketBytes = ipc.FrameSize
 
-// Source listens for capture packets and republishes them as signals.
+// Source connects to the virtual gamepad IPC server and republishes rumble events as signals.
 type Source struct {
-	addr string
-	log  *log.Logger
+	endpoint string
+	log      *log.Logger
 }
 
 // New builds the source. Profile parameters:
 //
-//	listen  UDP address to bind (default 127.0.0.1:9998)
+//	listen  IPC endpoint to connect to (default 127.0.0.1:9998, or unix:///path.sock)
 func New(cfg profile.Source, deps source.Deps) (source.Source, error) {
-	addr := DefaultListen
+	ep := DefaultListen
 	if v, ok := cfg.Params["listen"]; ok {
 		if s, ok := v.(string); ok && s != "" {
-			addr = s
+			ep = s
 		}
 	}
 	logger := deps.Logger
 	if logger == nil {
 		logger = log.Default()
 	}
-	return &Source{addr: addr, log: logger}, nil
+	return &Source{endpoint: ep, log: logger}, nil
 }
 
 func (s *Source) Name() string { return "ffb" }
 
-// Run listens until ctx ends and forwards every packet as one frame.
+// Run connects to the virtual pad IPC server and pushes incoming rumble frames.
 func (s *Source) Run(ctx context.Context, out chan<- signal.Frame) error {
-	udpAddr, err := net.ResolveUDPAddr("udp4", s.addr)
-	if err != nil {
-		return fmt.Errorf("ffb: %w", err)
-	}
-	conn, err := net.ListenUDP("udp4", udpAddr)
-	if err != nil {
-		return fmt.Errorf("ffb: listen %s: %w", s.addr, err)
-	}
-	defer conn.Close()
-	s.log.Printf("ffb: listening on %s for virtual-pad rumble", s.addr)
+	s.log.Printf("ffb: connecting to virtual-pad IPC at %s", s.endpoint)
 
+	buf := make([]byte, ipc.FrameSize)
+	for ctx.Err() == nil {
+		conn, err := ipc.Dial(ctx, s.endpoint)
+		if err != nil {
+			select {
+			case <-time.After(250 * time.Millisecond):
+				continue
+			case <-ctx.Done():
+				return nil
+			}
+		}
+
+		s.log.Printf("ffb: connected to virtual pad IPC (%s)", s.endpoint)
+		s.stream(ctx, conn, buf, out)
+		_ = conn.Close()
+
+		if ctx.Err() == nil {
+			s.log.Printf("ffb: connection lost, reconnecting...")
+		}
+	}
+	return nil
+}
+
+func (s *Source) stream(ctx context.Context, conn net.Conn, buf []byte, out chan<- signal.Frame) {
 	go func() {
 		<-ctx.Done()
-		_ = conn.SetReadDeadline(time.Now())
+		_ = conn.Close()
 	}()
 
-	buf := make([]byte, 64)
 	for {
-		n, _, err := conn.ReadFromUDP(buf)
+		left, right, _, err := ipc.ReadFrame(conn, buf)
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil
+			if ctx.Err() != nil || err == io.EOF {
+				return
 			}
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				return nil
-			}
-			return fmt.Errorf("ffb: read: %w", err)
+			return
 		}
-		left, right, ok := decode(buf[:n])
-		if !ok {
-			continue
-		}
+
 		select {
 		case out <- signal.Frame{
 			At: time.Now(),
@@ -110,22 +108,15 @@ func (s *Source) Run(ctx context.Context, out chan<- signal.Frame) error {
 			},
 		}:
 		case <-ctx.Done():
-			return nil
+			return
 		}
 	}
 }
 
-func decode(b []byte) (left, right float32, ok bool) {
-	if len(b) < 6 || binary.LittleEndian.Uint32(b) != Magic {
-		return 0, 0, false
-	}
-	return float32(b[4]) / 255, float32(b[5]) / 255, true
-}
-
-// Encode builds a capture packet; used by virtual-pad backends and tests.
+// Encode builds a capture packet; used by tests and virtual-pad backends.
 func Encode(left, right uint8, seq uint32) []byte {
-	b := make([]byte, PacketBytes)
-	binary.LittleEndian.PutUint32(b[0:], Magic)
+	b := make([]byte, ipc.FrameSize)
+	binary.LittleEndian.PutUint32(b[0:], ipc.Magic)
 	b[4] = left
 	b[5] = right
 	binary.LittleEndian.PutUint32(b[8:], seq)

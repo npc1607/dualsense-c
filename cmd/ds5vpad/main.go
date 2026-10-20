@@ -7,7 +7,7 @@
 // other process writes the controller's HID output.
 //
 // Linux uses /dev/uinput (install udev/71-ds5vpad.rules first). The Windows
-// backend is stubbed out; see internal/vpad/vpad_windows.go for the plan.
+// backend uses ViGEmBus (XInput) and planned vJoy (DirectInput 8).
 package main
 
 import (
@@ -15,16 +15,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
-	"time"
 
-	"github.com/npc1607/dualsense-c/internal/source/ffb"
 	"github.com/npc1607/dualsense-c/internal/vpad"
 	_ "github.com/npc1607/dualsense-c/internal/vpad/all"
+	"github.com/npc1607/dualsense-c/internal/vpad/ipc"
 )
 
 var version = "dev"
@@ -34,8 +31,8 @@ func main() {
 		proto   = flag.String("proto", string(vpad.ProtocolXInput), "virtual pad protocol: xinput (default, Xbox 360) or dinput8 (Logitech Dual Action DirectInput 8)")
 		name    = flag.String("name", "", "virtual device name (default: auto per protocol)")
 		grab    = flag.String("grab", "", "physical evdev node to grab (default: auto-detect DualSense)")
-		publish = flag.String("publish", ffb.DefaultListen, "UDP address to publish rumble to")
-		hz      = flag.Int("hz", 60, "rumble publish rate")
+		listen  = flag.String("listen", ipc.DefaultEndpoint, "ultra-low latency IPC endpoint for force feedback (e.g. 127.0.0.1:9998 or unix:///tmp/ds5vpad.sock)")
+		publish = flag.String("publish", "", "alias for -listen (deprecated)")
 		quiet   = flag.Bool("quiet", false, "only log errors")
 		showVer = flag.Bool("version", false, "print version and exit")
 	)
@@ -51,46 +48,21 @@ func main() {
 		logger.SetOutput(os.Stderr)
 	}
 
-	addr, err := net.ResolveUDPAddr("udp4", *publish)
-	if err != nil {
-		logger.Fatalf("bad -publish: %v", err)
+	endpoint := *listen
+	if *publish != "" {
+		endpoint = *publish
 	}
-	conn, err := net.DialUDP("udp4", nil, addr)
-	if err != nil {
-		logger.Fatalf("dial %s: %v", *publish, err)
-	}
-	defer conn.Close()
 
-	// The backend reports rumble on arbitrary goroutines; send from one place so
-	// the datagrams stay in order and the socket is not shared.
-	reports := make(chan vpad.Rumble, 32)
-	var seq uint32
+	// Start ultra-low latency event-driven IPC server.
+	// If no consumers connect, broadcast is a zero-alloc no-op (no socket blasting, no error spam).
+	srv, err := ipc.Listen(endpoint, logger)
+	if err != nil {
+		logger.Fatalf("ipc listen: %v", err)
+	}
+	defer srv.Close()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	go func() {
-		tick := time.NewTicker(time.Second / time.Duration(*hz))
-		defer tick.Stop()
-		var last vpad.Rumble
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case r := <-reports:
-				last = r
-			case <-tick.C:
-				// Expire a state the game stopped refreshing so the motors do
-				// not stay stuck on after a pause or a level change.
-				if !last.At.IsZero() && time.Since(last.At) > 500*time.Millisecond {
-					last = vpad.Rumble{At: last.At}
-				}
-				seq++
-				if _, err := conn.Write(ffb.Encode(last.Left, last.Right, seq)); err != nil {
-					logger.Printf("publish: %v", err)
-				}
-			}
-		}
-	}()
 
 	var cfg vpad.Config
 	switch vpad.Protocol(*proto) {
@@ -107,11 +79,9 @@ func main() {
 	cfg.GrabPath = *grab
 	cfg.Logger = logger
 
+	// Broadcast rumble events immediately (< 50 microseconds) with zero ticker delay
 	sink := func(r vpad.Rumble) {
-		select {
-		case reports <- r:
-		default: // drop rather than block the FF control channel
-		}
+		srv.Broadcast(r)
 	}
 
 	pad, err := vpad.Open(cfg, sink)
@@ -122,11 +92,9 @@ func main() {
 	logger.Printf("virtual pad: %s", pad.Name())
 
 	if !*quiet {
-		logger.Printf("forwarding input from the physical controller; publishing rumble to %s at %d Hz", *publish, *hz)
+		logger.Printf("forwarding input from physical controller; serving FFB IPC on %s", endpoint)
 	}
 	if err := pad.Run(ctx); err != nil && ctx.Err() == nil {
 		logger.Fatalf("%v", err)
 	}
-	atomic.AddUint32(&seq, 0) // keep the counter alive for the deferred send path
-	_ = conn.Close()
 }

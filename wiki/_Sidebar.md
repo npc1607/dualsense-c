@@ -9,6 +9,8 @@
 - [音频 AI](Audio-AI)
 - [力反馈镜像](FFB-and-Virtual-Pad)
 - [AC / ACC / AC Rally](ACR-AC-ACC)
+- [理查德·伯恩斯拉力赛 (RBR)](RBR)
+- [RBR 控制器二进制结构 (ACM)](RBR-ACM-Format)
 - [Far Far West 实例](Far-Far-West)
 - [平台支持](Platform-Support)
 - [故障排查](Troubleshooting)

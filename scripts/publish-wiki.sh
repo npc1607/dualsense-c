@@ -16,7 +16,12 @@ MSG="${1:-docs(wiki): sync pages}"
 
 [ -d "$SRC" ] || { echo "missing $SRC" >&2; exit 1; }
 
-URL="${DS5_WIKI_URL:-git@github.com:$REPO_SLUG.wiki.git}"
+ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+DEFAULT_WIKI_URL="https://github.com/$REPO_SLUG.wiki.git"
+if [[ "$ORIGIN_URL" =~ ^git@ ]]; then
+	DEFAULT_WIKI_URL="git@github.com:$REPO_SLUG.wiki.git"
+fi
+URL="${DS5_WIKI_URL:-$DEFAULT_WIKI_URL}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

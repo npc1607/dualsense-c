@@ -54,8 +54,10 @@ const (
 	defReleaseMS = 90.0
 )
 
-// Source turns a PipeWire monitor into envelope signals.
+// Source turns a system audio monitor into envelope signals.
 type Source struct {
+	target       string
+	customCmd    bool
 	cmd          []string
 	rate         int
 	channels     int
@@ -180,6 +182,7 @@ func New(cfg profile.Source, deps source.Deps) (source.Source, error) {
 	}
 	format := getS("format", defFormat)
 
+	customCmd := getS("command", "") != ""
 	tmpl := getS("command", defCommand)
 	repl := strings.NewReplacer(
 		"{target}", target,
@@ -213,16 +216,18 @@ func New(cfg profile.Source, deps source.Deps) (source.Source, error) {
 	}
 
 	s := &Source{
-		cmd:      cmd,
-		rate:     rate,
-		channels: channels,
-		emitHz:   getI("rate_hz", defEmitHz),
-		gain:     getF("gain", defGain),
-		bassL:    newHighPassCascade(bassLo, float64(rate)),
-		bassH:    newLowPassCascade(bassHi, float64(rate)),
-		midL:     newHighPassCascade(midLo, float64(rate)),
-		midH:     newLowPassCascade(midHi, float64(rate)),
-		log:      logger,
+		target:    target,
+		customCmd: customCmd,
+		cmd:       cmd,
+		rate:      rate,
+		channels:  channels,
+		emitHz:    getI("rate_hz", defEmitHz),
+		gain:      getF("gain", defGain),
+		bassL:     newHighPassCascade(bassLo, float64(rate)),
+		bassH:     newLowPassCascade(bassHi, float64(rate)),
+		midL:      newHighPassCascade(midLo, float64(rate)),
+		midH:      newLowPassCascade(midHi, float64(rate)),
+		log:       logger,
 	}
 	if s.emitHz <= 0 {
 		s.emitHz = defEmitHz
@@ -284,24 +289,33 @@ func parseBand(spec string, defLo, defHi float64) (float64, float64) {
 
 func (s *Source) Name() string { return "audio" }
 
-// Run spawns the capture command and processes its PCM stream until ctx ends.
+// Run opens the capture stream and processes its PCM stream until ctx ends.
 func (s *Source) Run(ctx context.Context, out chan<- signal.Frame) error {
-	cmd := exec.CommandContext(ctx, s.cmd[0], s.cmd[1:]...)
-	stdout, err := cmd.StdoutPipe()
+	rc, waitFn, err := s.openCapture(ctx)
 	if err != nil {
-		return fmt.Errorf("audio: %w", err)
+		return err
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("audio: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("audio: start %s: %w", s.cmd[0], err)
-	}
-	s.log.Printf("audio: capturing %s (%s %dch %d Hz)", strings.Join(s.cmd, " "), s.cmd[0], s.channels, s.rate)
 	if s.clf != nil {
 		go s.classifyLoop(ctx)
 	}
+	err = s.consume(ctx, rc, out)
+	return waitFn(err)
+}
+
+func (s *Source) openCommandCapture(ctx context.Context) (io.ReadCloser, func(error) error, error) {
+	cmd := exec.CommandContext(ctx, s.cmd[0], s.cmd[1:]...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("audio: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("audio: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("audio: start %s: %w", s.cmd[0], err)
+	}
+	s.log.Printf("audio: capturing %s (%s %dch %d Hz)", strings.Join(s.cmd, " "), s.cmd[0], s.channels, s.rate)
 
 	// Surface the capture tool's diagnostics instead of swallowing them.
 	go func() {
@@ -314,19 +328,21 @@ func (s *Source) Run(ctx context.Context, out chan<- signal.Frame) error {
 		}
 	}()
 
-	err = s.consume(ctx, stdout, out)
-	_ = cmd.Process.Kill()
-	werr := cmd.Wait()
-	if ctx.Err() != nil {
-		return nil
+	waitFn := func(consumeErr error) error {
+		_ = cmd.Process.Kill()
+		werr := cmd.Wait()
+		if ctx.Err() != nil {
+			return nil
+		}
+		if consumeErr != nil {
+			return consumeErr
+		}
+		if werr != nil {
+			return fmt.Errorf("audio: capture command exited: %w", werr)
+		}
+		return io.EOF
 	}
-	if err != nil {
-		return err
-	}
-	if werr != nil {
-		return fmt.Errorf("audio: capture command exited: %w", werr)
-	}
-	return io.EOF
+	return stdout, waitFn, nil
 }
 
 // idleAfter is how long the capture may stay silent before we start emitting
@@ -701,30 +717,6 @@ func (e *envFollower) stepN(x float64, n int) float64 {
 	k := math.Pow(1-c, float64(n))
 	e.y = x + (e.y-x)*k
 	return e.y
-}
-
-// detectMonitor finds the default sink's monitor, which is what the user is
-// actually hearing.
-func detectMonitor() (string, error) {
-	if out, err := exec.Command("pactl", "get-default-sink").Output(); err == nil {
-		if name := strings.TrimSpace(string(out)); name != "" {
-			return name + ".monitor", nil
-		}
-	}
-	out, err := exec.Command("pactl", "list", "short", "sources").Output()
-	if err != nil {
-		return "", fmt.Errorf("audio: target=auto needs pactl: %w", err)
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Split(line, "\t")
-		if len(fields) >= 2 {
-			name := strings.TrimSpace(fields[1])
-			if strings.HasSuffix(name, ".monitor") {
-				return name, nil
-			}
-		}
-	}
-	return "", errors.New("audio: target=auto found no monitor source")
 }
 
 // isTimeout reports whether err is a read deadline expiry.

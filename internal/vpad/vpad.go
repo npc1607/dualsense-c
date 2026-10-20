@@ -16,7 +16,7 @@
 //
 // Platform support:
 //   - Linux: implemented via /dev/uinput.
-//   - Windows: planned ViGEmBus (XInput) and vJoy / ViGEm DS4 (DirectInput 8).
+//   - Windows: implemented with ViGEmBus / ViGEmClient.dll (XInput), planned vJoy / ViGEm DS4 (DirectInput 8).
 package vpad
 
 import (

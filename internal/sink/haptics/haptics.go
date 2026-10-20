@@ -55,17 +55,6 @@ type Config struct {
 	Command string
 }
 
-// pacat (PulseAudio compat) honours --device; pw-cat's --target is silently
-// ignored by some PipeWire versions, which would play into the wrong sink.
-//
-// --channel-map is not optional: without it PipeWire picks a "4 channel"
-// layout such as front-left,front-center,front-right,rear-center and remixes
-// our channels 3/4 into the headphone path, so the voice coils receive
-// nothing. Naming the sink's own layout keeps the 4 channels byte-for-byte
-// aligned with the hardware, which is what puts our samples on the coils.
-const defaultCommand = "pacat --playback --device={target} --rate={rate} --channels={channels} " +
-	"--channel-map=front-left,front-right,rear-left,rear-right --format=s16le --latency-msec=10 --process-time-msec=2 --raw"
-
 // Writer mixes a continuous 4-channel stream. Channels 1/2 are kept silent and
 // channels 3/4 carry the haptic waveform.
 type Writer struct {
@@ -103,9 +92,6 @@ func Open(cfg Config, logger *log.Logger) (*Writer, error) {
 	if cfg.Gain <= 0 {
 		cfg.Gain = 0.55
 	}
-	if cfg.Command == "" {
-		cfg.Command = defaultCommand
-	}
 	if cfg.Mode == "" {
 		cfg.Mode = "synth"
 	}
@@ -131,27 +117,17 @@ func Open(cfg Config, logger *log.Logger) (*Writer, error) {
 		}
 		target = t
 	}
-	repl := strings.NewReplacer("{target}", target, "{rate}", strconv.Itoa(SampleRate),
-		"{channels}", "4")
-	fields := strings.Fields(repl.Replace(cfg.Command))
-	if len(fields) == 0 {
-		return nil, fmt.Errorf("haptics: empty command")
-	}
-
-	cmd := exec.Command(fields[0], fields[1:]...)
-	stdin, err := cmd.StdinPipe()
+	pcm, cmd, err := openPlayback(cfg, target, logger)
 	if err != nil {
-		return nil, fmt.Errorf("haptics: %w", err)
+		return nil, err
 	}
-	cmd.Stderr = &logWriter{log: logger, prefix: "haptics[" + fields[0] + "]"}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("haptics: start %s: %w", fields[0], err)
-	}
-	w := &Writer{cfg: cfg, log: logger, pcm: stdin, cmd: cmd}
+	w := &Writer{cfg: cfg, log: logger, pcm: pcm, cmd: cmd}
 	if cfg.Mode == "passthrough" {
 		if err := w.openCapture(); err != nil {
-			_ = stdin.Close()
-			_ = cmd.Process.Kill()
+			_ = pcm.Close()
+			if cmd != nil && cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
 			return nil, err
 		}
 		logger.Printf("haptics: passthrough %q → coils at %d Hz, band %.0f–%.0f Hz",
@@ -160,6 +136,26 @@ func Open(cfg Config, logger *log.Logger) (*Writer, error) {
 		logger.Printf("haptics: streaming to %q at %d Hz (carrier %.0f Hz)", target, SampleRate, cfg.CarrierHz)
 	}
 	return w, nil
+}
+
+func openCommandPlayback(cmdTmpl, target string, logger *log.Logger) (io.WriteCloser, *exec.Cmd, error) {
+	repl := strings.NewReplacer("{target}", target, "{rate}", strconv.Itoa(SampleRate),
+		"{channels}", "4")
+	fields := strings.Fields(repl.Replace(cmdTmpl))
+	if len(fields) == 0 {
+		return nil, nil, fmt.Errorf("haptics: empty command")
+	}
+
+	cmd := exec.Command(fields[0], fields[1:]...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("haptics: %w", err)
+	}
+	cmd.Stderr = &logWriter{log: logger, prefix: "haptics[" + fields[0] + "]"}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("haptics: start %s: %w", fields[0], err)
+	}
+	return stdin, cmd, nil
 }
 
 // Set updates the requested amplitudes (0..255). Safe to call from the sink
@@ -217,11 +213,13 @@ func (w *Writer) Close() {
 	if w.capPCM != nil {
 		_ = w.capPCM.Close()
 	}
-	if w.capCmd != nil {
+	if w.capCmd != nil && w.capCmd.Process != nil {
 		_ = w.capCmd.Process.Kill()
 		_, _ = w.capCmd.Process.Wait()
 	}
-	_ = w.pcm.Close()
+	if w.pcm != nil {
+		_ = w.pcm.Close()
+	}
 	if w.cmd != nil {
 		_ = w.cmd.Wait()
 	}
@@ -235,31 +233,6 @@ func clampf(v, lo, hi float64) float64 {
 		return hi
 	}
 	return v
-}
-
-// DetectSink finds the controller's playback sink via pactl.
-func DetectSink() (string, error) {
-	out, err := exec.Command("pactl", "list", "short", "sinks").Output()
-	if err != nil {
-		return "", fmt.Errorf("haptics: cannot list sinks (is pactl installed?): %w", err)
-	}
-	best := ""
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Split(line, "\t")
-		if len(fields) < 2 {
-			continue
-		}
-		name := strings.TrimSpace(fields[1])
-		low := strings.ToLower(name)
-		if strings.Contains(low, "dualsense") || strings.Contains(low, "054c") {
-			best = name
-			break
-		}
-	}
-	if best == "" {
-		return "", fmt.Errorf("haptics: no DualSense sink found; set haptics.target explicitly (pactl list short sinks)")
-	}
-	return best, nil
 }
 
 // biquad is a direct-form-1 second-order section.
@@ -317,18 +290,11 @@ func (w *Writer) openCapture() error {
 		}
 		src = s
 	}
-	cmd := exec.Command("parec", "--device="+src, "--rate="+strconv.Itoa(SampleRate),
-		"--channels=2", "--format=float32le", "--latency-msec=20",
-		"--process-time-msec=2", "--raw")
-	out, err := cmd.StdoutPipe()
+	capPCM, capCmd, err := openPassthroughCapture(src, w.log)
 	if err != nil {
-		return fmt.Errorf("haptics: capture pipe: %w", err)
+		return err
 	}
-	cmd.Stderr = &logWriter{log: w.log, prefix: "haptics[parec]"}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("haptics: start parec: %w", err)
-	}
-	w.capCmd, w.capPCM = cmd, out
+	w.capCmd, w.capPCM = capCmd, capPCM
 	for i := range w.pasL {
 		w.pasL[i] = highPass(w.cfg.LowHz, SampleRate)
 		w.pasR[i] = highPass(w.cfg.LowHz, SampleRate)
@@ -337,26 +303,6 @@ func (w *Writer) openCapture() error {
 	w.pasL[2] = lowPass(w.cfg.HighHz, SampleRate)
 	w.pasR[2] = lowPass(w.cfg.HighHz, SampleRate)
 	return nil
-}
-
-// DetectMonitor finds the default sink's monitor source.
-func DetectMonitor() (string, error) {
-	if out, err := exec.Command("pactl", "get-default-sink").Output(); err == nil {
-		if name := strings.TrimSpace(string(out)); name != "" {
-			return name + ".monitor", nil
-		}
-	}
-	out, err := exec.Command("pactl", "list", "short", "sources").Output()
-	if err != nil {
-		return "", fmt.Errorf("haptics: cannot find monitor (pactl missing?): %w", err)
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		f := strings.Split(line, "\t")
-		if len(f) >= 2 && strings.HasSuffix(strings.TrimSpace(f[1]), ".monitor") {
-			return strings.TrimSpace(f[1]), nil
-		}
-	}
-	return "", fmt.Errorf("haptics: no monitor source found")
 }
 
 // passBlock turns one stereo block of game audio into coil PCM.

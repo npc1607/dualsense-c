@@ -1,5 +1,3 @@
-//go:build linux
-
 // Command hidprobe writes DualSense output reports with different flag/volume
 // combinations while audio is being played to the controller's 4-channel USB
 // interface. It exists to answer one hardware question that no amount of unit
@@ -9,7 +7,8 @@
 // Each variant is announced with N rumble pulses, so a tester can report
 // "variant N vibrated" without watching a screen.
 //
-//	./bin/hidprobe -dev /dev/hidraw6          # variants 1..4
+//	./bin/hidprobe                            # auto-detect DualSense, variants 1..4
+//	./bin/hidprobe -dev /dev/hidraw6          # explicit path
 //	./bin/hidprobe -dev /dev/hidraw6 -only 3  # just one
 //
 // Play low-frequency audio into the controller at the same time, e.g.
@@ -24,6 +23,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/npc1607/dualsense-c/internal/device"
 )
 
 // Report offsets (same layout the project uses for USB reports).
@@ -77,23 +78,32 @@ var variants = []variant{
 }
 
 func main() {
-	dev := flag.String("dev", "", "DualSense hidraw node (required)")
+	dev := flag.String("dev", "", "DualSense device path (default: auto-detect)")
 	only := flag.Int("only", 0, "run only this variant number (1-based), 0 = all")
 	hold := flag.Duration("hold", 3*time.Second, "how long each variant runs")
 	noMarker := flag.Bool("no-marker", false, "skip the numbered rumble pulses (use when testing the coils, which the markers would mask)")
 	flag.Parse()
-	if *dev == "" {
-		fmt.Fprintln(os.Stderr, "usage: hidprobe -dev /dev/hidraw6")
-		os.Exit(2)
-	}
 
-	f, err := os.OpenFile(*dev, os.O_RDWR, 0)
+	var (
+		d   device.Device
+		err error
+	)
+	if *dev != "" {
+		d, err = device.OpenPath(*dev)
+	} else {
+		var info device.Info
+		info, err = device.Find()
+		if err == nil {
+			d, err = device.Open(info)
+		}
+	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "open %s: %v\n", *dev, err)
+		fmt.Fprintf(os.Stderr, "open device: %v\n", err)
 		os.Exit(1)
 	}
-	defer f.Close()
+	defer d.Close()
 
+	fmt.Printf("device: %s\n", d.Info())
 	fmt.Println("请同时往手柄 Ch3/4（音圈）播放 40Hz 低频；每个变体前面有 N 次震动作为编号。")
 	for i, v := range variants {
 		n := i + 1
@@ -103,16 +113,16 @@ func main() {
 		fmt.Printf("\n=== 变体 %s: %s\n", v.name, v.description)
 		if !*noMarker {
 			fmt.Printf("    (接下来 %d 次震动是编号标记)\n", n)
-			marker(f, n)
+			marker(d, n)
 		}
 		fmt.Printf("    >>> 现在开始纯音圈测试（无标记震动），持续 %s\n", *hold)
-		tick(f, v, *hold)
+		tick(d, v, *hold)
 	}
 	fmt.Println("\n完成。")
 }
 
 // marker pulses the motors n times so the tester can identify the variant.
-func marker(f *os.File, n int) {
+func marker(d device.Device, n int) {
 	b := make([]byte, 64)
 	b[0] = 0x02
 	b[offFlags0] = 0x0F
@@ -122,16 +132,16 @@ func marker(f *os.File, n int) {
 	b[offValid2] = 0x03
 	b[offBright] = 0x02
 	for i := 0; i < n; i++ {
-		f.Write(b[:48])
+		_ = d.Write(b[:48])
 		time.Sleep(140 * time.Millisecond)
 		b[offRumbleR], b[offRumbleL] = 0, 0
-		f.Write(b[:48])
+		_ = d.Write(b[:48])
 		time.Sleep(140 * time.Millisecond)
 	}
 }
 
-// tick streams the variant's report at 125 Hz for d, with motors silent.
-func tick(f *os.File, v variant, d time.Duration) {
+// tick streams the variant's report at 125 Hz for dur, with motors silent.
+func tick(d device.Device, v variant, dur time.Duration) {
 	b := make([]byte, v.size)
 	b[0] = 0x02
 	b[offFlags0] = v.f0
@@ -148,9 +158,9 @@ func tick(f *os.File, v variant, d time.Duration) {
 		// lightbar: dim white, so the report is visibly accepted
 		b[offLight], b[offLight+1], b[offLight+2] = 30, 30, 30
 	}
-	deadline := time.Now().Add(d)
+	deadline := time.Now().Add(dur)
 	for time.Now().Before(deadline) {
-		if _, err := f.Write(b); err != nil {
+		if err := d.Write(b); err != nil {
 			fmt.Fprintf(os.Stderr, "write: %v\n", err)
 			return
 		}

@@ -20,11 +20,14 @@ import (
 )
 
 /*
-#cgo CFLAGS: -I/usr/include/onnxruntime -I/usr/include
+#cgo linux CFLAGS: -I/usr/include/onnxruntime -I/usr/include
 #cgo linux LDFLAGS: -lonnxruntime
 #cgo windows LDFLAGS: -lonnxruntime
 
 #include <stdlib.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <onnxruntime_c_api.h>
 
 static const OrtApi* ds5_api(void) {
@@ -59,7 +62,22 @@ static OrtStatus* ds5_session_options(const OrtApi* a, int threads, OrtSessionOp
 
 static OrtStatus* ds5_create_session(const OrtApi* a, OrtEnv* env, const char* path,
 		OrtSessionOptions* opts, OrtSession** sess) {
+#ifdef _WIN32
+	int len = MultiByteToWideChar(CP_UTF8, 0, path, -1, NULL, 0);
+	if (len <= 0) {
+		return a->CreateStatus(ORT_INVALID_ARGUMENT, "invalid UTF-8 model path");
+	}
+	wchar_t* wpath = (wchar_t*)malloc((size_t)len * sizeof(wchar_t));
+	if (!wpath) {
+		return a->CreateStatus(ORT_RUNTIME_EXCEPTION, "out of memory allocating model path");
+	}
+	MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, len);
+	OrtStatus* st = a->CreateSession(env, wpath, opts, sess);
+	free(wpath);
+	return st;
+#else
 	return a->CreateSession(env, path, opts, sess);
+#endif
 }
 
 static OrtStatus* ds5_input_name(const OrtApi* a, OrtSession* sess, char** name) {

@@ -33,6 +33,9 @@ type State struct {
 	Triangle    bool
 	Up, Down    bool
 	Left, Right bool
+	Create      bool
+	Options     bool
+	L3, R3      bool
 	PS          bool
 	Touchpad    bool
 	Mute        bool
@@ -126,6 +129,10 @@ func Parse(b []byte) (State, bool) {
 	s.L1 = b0&0x10 != 0
 	s.R1 = b0&0x20 != 0
 
+	s.Create = b1&0x01 != 0
+	s.Options = b1&0x02 != 0
+	s.L3 = b1&0x04 != 0
+	s.R3 = b1&0x08 != 0
 	s.PS = b1&0x10 != 0
 	s.Touchpad = b1&0x20 != 0
 	s.Mute = b1&0x40 != 0
@@ -259,6 +266,10 @@ func (s State) Signals() map[string]float32 {
 		"down":     b2f(s.Down),
 		"left":     b2f(s.Left),
 		"right":    b2f(s.Right),
+		"create":   b2f(s.Create),
+		"options":  b2f(s.Options),
+		"l3":       b2f(s.L3),
+		"r3":       b2f(s.R3),
 		"ps":       b2f(s.PS),
 		"touchpad": b2f(s.Touchpad),
 		"mute":     b2f(s.Mute),

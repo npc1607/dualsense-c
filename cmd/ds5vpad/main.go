@@ -7,7 +7,7 @@
 // other process writes the controller's HID output.
 //
 // Linux uses /dev/uinput (install udev/71-ds5vpad.rules first). The Windows
-// backend uses ViGEmBus (XInput) and planned vJoy (DirectInput 8).
+// backend uses ViGEmBus (XInput) and DirectInput 8 (vJoy).
 package main
 
 import (

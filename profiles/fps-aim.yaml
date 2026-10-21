@@ -1,0 +1,77 @@
+# 单机 FPS 辅助瞄准与体感增强配置
+name: fps-aim
+title: 单机 FPS 辅助瞄准与体感增强
+description: |
+  包含 S 型自适应曲线、One Euro 手抖滤波、L2 举镜陀螺仪精瞄及 R2 弹道自适应压枪。
+  纯输入端前置增强，专为单机 FPS 打造。
+
+source:
+  type: trigger
+  rate_hz: 250
+
+# ----------------------------------------------------
+# 1. 摇杆辅助与曲线定义
+# ----------------------------------------------------
+aim_assist:
+  # 摇杆响应曲线
+  curve:
+    type: sigmoid           # 可选: linear | power | sigmoid | dual_zone
+    exponent: 6.5           # Sigmoid 斜率系数 (或 power 的 gamma 指数)
+    mid_point: 0.52         # S 弯转折中心 (0.0 ~ 1.0)
+    inner_deadzone: 0.04    # 物理摇杆硬件死区
+    outer_boost: 1.5        # 推到底部时的加速倍率 (大转身)
+
+  # 滤波抗抖算法
+  filter:
+    type: one_euro          # 可选: none | ema | one_euro
+    min_cutoff: 0.85        # 低速截断频率 (Hz)，越低越防抖
+    beta: 0.045             # 高速响应因子，越大越无延迟
+    d_cutoff: 1.0           # 导数变化率平滑截断频率
+
+  # 陀螺仪体感微调
+  gyro:
+    enabled: true
+    trigger: l2_hold        # 触发方式: l2_hold (按住瞄准) | touch (轻触触摸板) | always
+    trigger_threshold: 0.15 # L2 按下行程阈值
+    natural_angle_deg: 35   # 自然手握倾角投影
+    deadzone_dps: 0.4       # 紧绷死区 (度/秒)，滤除心跳微颤
+    sens_yaw: 1.85          # 水平微调灵敏度
+    sens_pitch: 1.35        # 垂直微调灵敏度
+    invert_pitch: false
+
+  # 自动反冲抑制 (压枪)
+  anti_recoil:
+    enabled: true
+    trigger: r2_full        # 触发源 (当 R2 踩过 85% 连发时)
+    start_delay: 60ms       # 击发后微小延迟
+    burst_force: 420        # 前 3 发瞬间爆发下压力度
+    burst_decay: 0.015      # 初始爆发衰减速率
+    sustain_force: 180      # 持续连发稳态下压力度
+    jitter_noise: 25        # 高斯随机散布震颤度 (防机械死板)
+
+# ----------------------------------------------------
+# 2. 原生自适应扳机阻尼与触觉反馈联动
+# ----------------------------------------------------
+rules:
+  # L2 瞄准阶段：段落感
+  - name: l2-aim-wall
+    when: "l2 > 0.05 && l2 < 0.65"
+    target: l2
+    effect: feedback
+    params: { start: 0, strength: 160, force: 140 }
+
+  # R2 开火扳机：二道火击发阻尼
+  - name: r2-fire-break
+    when: "r2 >= 0.85"
+    target: r2
+    effect: off
+    priority: 20
+
+  # 连发后坐力震颤
+  - name: recoil-rumble
+    when: 'pressed("r2_full")'
+    target: rumble_right
+    priority: 50
+    hold: 120ms
+    value: "220"
+    modulate: { type: square, hz: 28, depth: 0.8 }

@@ -13,6 +13,7 @@
 - [直驱模拟器 FFB (AC/ACR)](Direct-Drive-FFB)
 - [理查德·伯恩斯拉力赛 (RBR)](RBR)
 - [RBR 控制器二进制结构 (ACM)](RBR-ACM-Format)
+- [FPS 辅助瞄准与体感增强 (Aim Assist)](FPS-Aim-Assist)
 - [Far Far West 实例](Far-Far-West)
 - [平台支持](Platform-Support)
 - [故障排查](Troubleshooting)

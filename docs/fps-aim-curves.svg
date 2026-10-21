@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 840" width="100%" height="100%">
+  <defs>
+    <filter id="shadow" x="-3%" y="-3%" width="106%" height="106%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.06"/>
+    </filter>
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 800; fill: #0f172a; }
+      .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 500; fill: #475569; }
+      .card-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-weight: 700; font-size: 17px; }
+      .axis-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; fill: #64748b; font-weight: 600; }
+      .curve-desc { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; font-size: 13.5px; fill: #334155; line-height: 1.45; }
+      .formula { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-weight: 700; fill: #2b8a3e; }
+    </style>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f8fafc" rx="16"/>
+
+  <!-- 顶部主副标题 -->
+  <g transform="translate(580, 45)" text-anchor="middle">
+    <text class="title" font-size="28" y="0">四大主流 FPS 摇杆响应算法与效果深度对比</text>
+    <text class="subtitle" font-size="15" y="28">横轴：物理摇杆偏离量 [0% .. 100%]  ——  纵轴：游戏内视口旋转角速度 [0% .. 100%]</text>
+  </g>
+
+  <!-- 坐标系与网格主体区域 -->
+  <!-- 坐标系左下角：(120, 560)，右上角：(580, 120)，宽460，高440 -->
+  <g transform="translate(0, 0)">
+    <!-- 背景框 -->
+    <rect x="100" y="100" width="500" height="480" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" filter="url(#shadow)"/>
+    
+    <!-- 网格线 -->
+    <path d="
+      M 140 540 L 560 540
+      M 140 435 L 560 435
+      M 140 330 L 560 330
+      M 140 225 L 560 225
+      M 140 120 L 560 120
+      M 140 540 L 140 120
+      M 245 540 L 245 120
+      M 350 540 L 350 120
+      M 455 540 L 455 120
+      M 560 540 L 560 120
+    " fill="none" stroke="#f1f3f5" stroke-width="1.5"/>
+
+    <!-- 坐标轴刻度标签 -->
+    <text class="axis-label" x="140" y="560" text-anchor="middle">0%</text>
+    <text class="axis-label" x="245" y="560" text-anchor="middle">25%</text>
+    <text class="axis-label" x="350" y="560" text-anchor="middle">50%</text>
+    <text class="axis-label" x="455" y="560" text-anchor="middle">75%</text>
+    <text class="axis-label" x="560" y="560" text-anchor="middle">100%</text>
+    
+    <text class="axis-label" x="125" y="544" text-anchor="end">0%</text>
+    <text class="axis-label" x="125" y="439" text-anchor="end">25%</text>
+    <text class="axis-label" x="125" y="334" text-anchor="end">50%</text>
+    <text class="axis-label" x="125" y="229" text-anchor="end">75%</text>
+    <text class="axis-label" x="125" y="124" text-anchor="end">100%</text>
+
+    <!-- 爆头微调区阴影提示 -->
+    <rect x="140" y="120" width="147" height="420" fill="#e7f5ff" opacity="0.45"/>
+    <text x="213" y="145" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#1971c2">微调爆头区 (0~35%)</text>
+
+    <!-- 极速转身区阴影提示 -->
+    <rect x="455" y="120" width="105" height="420" fill="#fff5f5" opacity="0.45"/>
+    <text x="507" y="145" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="700" fill="#e03131">极速转身区 (75~100%)</text>
+
+    <!-- 曲线 1: 线性 Linear (灰色虚线) -->
+    <line x1="140" y1="540" x2="560" y2="120" stroke="#868e96" stroke-width="2.5" stroke-dasharray="6,4"/>
+
+    <!-- 曲线 2: 指数幂次 Exponential y = x^2.2 (蓝色) -->
+    <path d="M 140 540 Q 380 520 560 120" fill="none" stroke="#1971c2" stroke-width="3.5"/>
+
+    <!-- 曲线 3: S形 Sigmoid (紫色，最推荐) -->
+    <path d="M 140 540 C 290 535 340 370 560 120" fill="none" stroke="#7048e8" stroke-width="4"/>
+
+    <!-- 曲线 4: 双区阶跃 Dual-Zone (橙色，守望先锋风格) -->
+    <path d="M 140 540 L 455 350 L 560 120" fill="none" stroke="#e8590c" stroke-width="3"/>
+  </g>
+
+  <!-- 右侧：四大曲线详述卡片列表 -->
+  <g transform="translate(630, 100)">
+
+    <!-- 卡片 1: 经典 S 型 Sigmoid (紫色) -->
+    <g transform="translate(0, 0)" filter="url(#shadow)">
+      <rect width="490" height="110" rx="10" fill="#f3f0ff" stroke="#7048e8" stroke-width="2"/>
+      <circle cx="20" cy="24" r="7" fill="#7048e8"/>
+      <text class="card-title" x="35" y="29" fill="#7048e8">1. 经典 S 型曲线 (Sigmoid / 智能自适应) ⭐ 最推荐</text>
+      <text class="formula" x="35" y="52">y = 1 / (1 + e^(-k * (x - x0))) 归一化</text>
+      <text class="curve-desc" x="35" y="74">前段极其平缓，手腕轻抖准心几乎不飘；中段斜率平稳适合跟枪；推到底斜率陡峭爆发 180° 闪身大拉枪。</text>
+    </g>
+
+    <!-- 卡片 2: 指数幂次曲线 Power / Exp (蓝色) -->
+    <g transform="translate(0, 125)" filter="url(#shadow)">
+      <rect width="490" height="110" rx="10" fill="#e7f5ff" stroke="#1971c2" stroke-width="2"/>
+      <circle cx="20" cy="24" r="7" fill="#1971c2"/>
+      <text class="card-title" x="35" y="29" fill="#1971c2">2. 指数幂次曲线 (Power Curve, γ = 2.0 ~ 2.5)</text>
+      <text class="formula" x="35" y="52">y = x^γ (γ 取 2.2)</text>
+      <text class="curve-desc" x="35" y="74">COD / 战地传统手感。小角度位移被显著压制，中远距离点射爆头率大幅提升，但后段提速相对平缓。</text>
+    </g>
+
+    <!-- 卡片 3: 双区曲线 Dual-Zone (橙色) -->
+    <g transform="translate(0, 250)" filter="url(#shadow)">
+      <rect width="490" height="110" rx="10" fill="#fff4e6" stroke="#e8590c" stroke-width="2"/>
+      <circle cx="20" cy="24" r="7" fill="#e8590c"/>
+      <text class="card-title" x="35" y="29" fill="#e8590c">3. 双区阶跃曲线 (Dual-Zone / 守望先锋风格)</text>
+      <text class="formula" x="35" y="52">x &lt; 85%: y = 0.4*x/0.85  |  x ≥ 85%: 突增至 100%</text>
+      <text class="curve-desc" x="35" y="74">内圈 85% 范围内全程低速匀速移动，推死外圈 15% 瞬间激发最高灵敏度。适合习惯线性但需要快速转身的玩家。</text>
+    </g>
+
+    <!-- 卡片 4: 线性输入 Linear (灰色) -->
+    <g transform="translate(0, 375)" filter="url(#shadow)">
+      <rect width="490" height="105" rx="10" fill="#f8f9fa" stroke="#868e96" stroke-width="2"/>
+      <circle cx="20" cy="24" r="7" fill="#868e96"/>
+      <text class="card-title" x="35" y="29" fill="#495057">4. 原始线性输入 (Linear / 物理直出)</text>
+      <text class="formula" x="35" y="52">y = x (无任何算法塑形)</text>
+      <text class="curve-desc" x="35" y="74">手柄默认状态。极难用手柄微调，轻碰一下就滑出目标头部；调低灵敏度又导致大转身慢如蜗牛，体验最差。</text>
+    </g>
+
+  </g>
+
+  <!-- 底部对比结论总结条 -->
+  <g transform="translate(100, 610)" filter="url(#shadow)">
+    <rect width="1020" height="190" rx="12" fill="#ffffff" stroke="#2563eb" stroke-width="1.8"/>
+    <text class="card-title" x="30" y="34" fill="#1d4ed8">💡 单机 FPS 实战选择建议与核心调优策略</text>
+    <line x1="30" y1="48" x2="990" y2="48" stroke="#e2e8f0" stroke-width="1.2"/>
+    <g class="curve-desc" transform="translate(30, 72)">
+      <text y="0">• <tspan font-weight="700" fill="#0f172a">狙击/慢节奏战术射击（如潜行者、辐射、生化危机）</tspan>：首选 <tspan font-weight="700" fill="#1971c2">Power 指数曲线 (γ=2.4)</tspan>，把微动死区彻底按死，开镜锁头稳如磐石。</text>
+      <text y="28">• <tspan font-weight="700" fill="#0f172a">高速爽快移动射击（如赛博朋克2077、DOOM、光环）</tspan>：首选 <tspan font-weight="700" fill="#7048e8">S 型 Sigmoid 曲线</tspan>，兼顾了近身大范围滑铲转身与中距离精准锁弱点。</text>
+      <text y="56">• <tspan font-weight="700" fill="#0f172a">搭配 1€ 滤波</tspan>：单开曲线容易放大中低速震颤，配合 One Euro 滤波可以在低转速段彻底滤除手指生理抖动。</text>
+      <text y="84">• <tspan font-weight="700" fill="#0f172a">结合 L2 陀螺仪微调</tspan>：摇杆曲线只负责将准心拉到目标周围 20 像素内，最后爆头由手腕体感 0 延迟完成，实现绝对人枪合一！</text>
+    </g>
+  </g>
+
+</svg>

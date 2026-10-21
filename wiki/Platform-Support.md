@@ -18,7 +18,7 @@ make windows
 # 产物：
 #   bin/ds5d.exe       主守护进程（自适应扳机、马达、灯条、WASAPI 音频采集与 4 声道音圈输出）
 #   bin/ds5ctl.exe     设备枚举、自检、校准与报文嗅探工具
-#   bin/ds5vpad.exe    基于 ViGEmBus 的虚拟 Xbox 360 手柄与力反馈捕获守护进程
+#   bin/ds5vpad.exe    基于 ViGEmBus 的虚拟手柄（XInput 360 / DirectInput 8 DS4）与力反馈捕获守护进程
 #   bin/ds5bridge.exe  AC / ACC / ACR 共享内存遥测桥接器
 #   bin/ffclient.exe   基于 XInput 的震动测试客户端
 #   bin/hidprobe.exe   音圈报告变体硬件探测工具
@@ -32,7 +32,7 @@ make windows
 | 音频采集（`source/audio`） | [已完成] `parec` 读 PipeWire monitor | [已完成] 原生 WASAPI Loopback（`internal/wasapi`） | DSP/包络单测 + Linux 真机已验 / Windows 待长测 | 默认通过 COM `IAudioCaptureClient` 抓取系统回环音频（`float32le`），亦支持通过 `command` 参数自定义（如 `ffmpeg`） |
 | 音圈输出（`sink/haptics`） | [已完成] `pacat` 4 声道 PCM | [已完成] 原生 WASAPI 4 声道渲染（`internal/wasapi`） | 4 声道合成单测 + Linux 真机已验 / Windows 待长测 | 自动定位 DualSense USB 声卡端点，通过 `WAVEFORMATEXTENSIBLE`（48 kHz 4ch `s16le`，`SPEAKER_QUAD` `0x33` 掩码）向 Ch3/4 音圈直写 PCM |
 | 音圈直通（`passthrough`） | [已完成] `parec` → 带通 → `pacat` | [已完成] WASAPI Loopback → 25–180 Hz 带通 → WASAPI 4ch | 带通滤波单测 + Linux 真机已验 / Windows 待长测 | 零外部依赖，把游戏原始低频谱实时送到左右音圈 |
-| 虚拟手柄（`internal/vpad`） | [已完成] `/dev/uinput` 虚拟 Xbox 360 | [已完成] `ViGEmClient.dll` + ViGEmBus 驱动 | `XUSB_REPORT` 单测 + Linux 实测 / Windows 待真机验证 | 创建虚拟 Xbox 360 手柄并转发物理 DualSense 输入，通过 `vigem_target_x360_register_notification` 原生回调捕获游戏力反馈 |
+| 虚拟手柄（`internal/vpad`） | [已完成] `/dev/uinput` 虚拟 Xbox 360 / DInput8 | [已完成] `ViGEmClient.dll` + ViGEmBus (XInput 360 + DirectInput 8 DS4) | `XUSB` / `DS4` 单测全覆盖 + Linux 实测 / Windows 待真机验证 | 创建虚拟手柄并转发物理 DualSense 输入；支持现代 XInput 与经典 DirectInput 8（DS4 目标暴露 6 轴独立踏板无合并与 14 离散键），通过 ViGEm 原生回调捕获游戏力反馈 |
 | 力反馈镜像（`source/ffb`） | [已完成] `ds5vpad` → UDP `FFB1` → `ds5d` | [已完成] `ds5vpad.exe` → UDP `FFB1` → `ds5d.exe` | 报文单测 + Linux 实测 / Windows 待真机验证 | Windows ViGEm 具备实时震动播放强度回调，无 Linux `uinput` upload-only 限制 |
 | AI 推理（`-tags onnx`） | [已完成] `make build-onnx` | [已完成] `make build-windows-onnx` | 报文单测 + YAMNet INT8 实测 | 支持 Windows 宽字符模型路径（`wchar_t*`）与可配置 `ORT_WIN_DIR` / `MINGW_CC` |
 | 启动脚本（`scripts/`） | [已完成] `scripts/ds5-acr.sh` | [已完成] `scripts/ds5-acr.ps1`（PowerShell 5.1+） | 脚本语法与流程校验 | 原生管理 `ds5d.exe` 与 `ds5bridge.exe`（`start`/`stop`/`restart`/`bridge-restart`/`status`/`logs`） |

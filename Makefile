@@ -42,6 +42,7 @@ windows: bridge
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BIN)/ds5d.exe ./cmd/ds5d
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BIN)/ds5ctl.exe ./cmd/ds5ctl
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BIN)/ds5vpad.exe ./cmd/ds5vpad
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BIN)/ds5radio.exe ./cmd/ds5radio
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BIN)/ffclient.exe ./tools/ffclient
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BIN)/hidprobe.exe ./tools/hidprobe
 

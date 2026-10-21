@@ -567,7 +567,7 @@ modulate: { type: square, hz: 30, depth: 1.0 }  # 方波调幅（适用于机械
 硬件控制层、音频管线与虚拟手柄层均已实现跨平台解耦：
 
 - **Linux**：原生操作 `/dev/hidraw*` 设备节点，使用 PipeWire/PulseAudio（`parec`/`pacat`）采集与输出音圈信号，通过 `/dev/uinput` 创建虚拟手柄。
-- **Windows**：通过 SetupAPI + `hid.dll` 读写 HID 报告，基于纯 Go 的 Core Audio / WASAPI COM（`internal/wasapi`）实现系统回环采集与 4 声道（`SPEAKER_QUAD` `0x33`）音圈直写，并通过 `ViGEmClient.dll` 实现虚拟 Xbox 360 手柄与原生力反馈回调（`ds5vpad.exe`）。
+- **Windows**：通过 SetupAPI + `hid.dll` 读写 HID 报告，基于纯 Go 的 Core Audio / WASAPI COM（`internal/wasapi`）实现系统回环采集与 4 声道（`SPEAKER_QUAD` `0x33`）音圈直写，并通过 `ViGEmClient.dll` 实现虚拟手柄（Xbox 360 与 DirectInput 8 DualShock 4）与原生力反馈回调（`ds5vpad.exe`）。
 
 > **Windows 部署说明**：
 > Windows 默认构建保持 100% 纯 Go（`CGO_ENABLED=0`）。部署至 Windows 时需注意：
@@ -671,7 +671,7 @@ profiles/                 用户自定义 Profile 目录
 | **高清音圈输出**（`sink/haptics` 合成模式） | [已完成] `pacat` 4 声道 PCM | [已完成] WASAPI 4 声道 `SPEAKER_QUAD` `0x33` | 4 声道合成单测 + Linux 真机已验 / Windows 待长测 | 向 DualSense USB 声卡 Ch3/4 写 48kHz PCM 驱动左右音圈，Ch1/2 扬声器保持静音 |
 | **游戏音频音圈直通**（`haptics.mode: passthrough`） | [已完成] `parec` → 带通 → `pacat` | [已完成] WASAPI Loopback → 带通 → WASAPI 4ch | 带通滤波单测 + Linux 真机已验 / Windows 待长测 | 25–180Hz 三阶带通滤波后把游戏低频波形直通左右音圈 |
 | **AI 音频事件与材质探测**（`source/audioai` + `-tags onnx`） | [已完成] `make build-onnx` + UDP 伴生源 | [已完成] `make build-windows-onnx` + `_WIN32` 宽字符路径 | 报文单测 + YAMNet INT8 实测 | 实时识别材质（水洼/铁板/木板/碎石）与战斗音效（枪声/爆炸/受击），支持进程内推理或独立进程 UDP 推送 |
-| **虚拟手柄与力反馈镜像**（`internal/vpad` + `source/ffb`） | [已完成] `/dev/uinput` 虚拟 Xbox 360 | [已完成] `ViGEmClient.dll` + ViGEmBus 驱动 | `XUSB_REPORT` 编码单测 + Linux `ffclient` 实测 / Windows 待真机验证 | 读取物理 DS5 并转发为虚拟 Xbox 360 手柄，捕获游戏震动后经 UDP 9998 转为 `ffb_left`/`ffb_right` |
+| **虚拟手柄与力反馈镜像**（`internal/vpad` + `source/ffb`） | [已完成] `/dev/uinput`（XInput / DInput8） | [已完成] `ViGEmClient.dll` + ViGEmBus（XInput 360 + DirectInput 8 DS4） | `XUSB` / `DS4` 编码单测 + Linux `ffclient` 实测 / Windows 待真机验证 | 读取物理 DS5 并转发为虚拟手柄（支持现代 XInput 及经典独立踏板 DInput 8），捕获游戏震动后经 UDP 9998 转为 `ffb_left`/`ffb_right` |
 | **一键启停脚本**（`scripts/`） | [已完成] `scripts/ds5-acr.sh` | [已完成] `scripts/ds5-acr.ps1` | 脚本语法与流程校验 | 一键管理 `ds5d` 与 `ds5bridge.exe` 生命周期、状态巡检与日志查看 |
 | **诊断与自测工具**（`ffclient` / `hidprobe` / `bridgesim`） | [已完成] evdev FF / `internal/device` | [已完成] `XInputSetState` / `internal/device` | 跨平台编译 + Linux 真机实测 | 用于独立验证虚拟手柄震动链路、音圈 HID 标志位与共享内存数据流 |
 | **伴生声学播报与车队电台**（`ds5radio` + `internal/radio`） | [已完成] 扬声器独立输出 + 规则/LLM 驱动 | [已完成] 扬声器独立输出 + 规则/LLM 驱动 | 单元测试 + 本地仿真已验 | 通过 DualSense 前置扬声器（Ch1/2）播放电台/路书，与 Ch3/4 触觉音圈正交 |
@@ -702,7 +702,7 @@ profiles/                 用户自定义 Profile 目录
 |---|---|---|
 | **`ds5d` / `ds5d.exe`** | 全部 | **核心守护程序**：加载 Profile，接收数据源信号，执行规则运算并以 125~250 Hz 写入控制器 |
 | **`ds5ctl` / `ds5ctl.exe`** | 全部 | **设备与配置工具**：设备枚举、硬件自检、离线规则验证及遥测抓包校准 |
-| **`ds5vpad` / `ds5vpad.exe`** | 全部 | **虚拟手柄与力反馈捕获**：创建虚拟手柄转发按键并捕获震动供 ffb 源消费 |
+| **`ds5vpad` / `ds5vpad.exe`** | 全部 | **虚拟手柄与力反馈捕获**：创建虚拟手柄（XInput Xbox 360 或 DirectInput 8 DS4）转发按键并捕获震动供 ffb 源消费 |
 | **`ds5radio` / `ds5radio.exe`** | 全部 | **伴生广播与情境语音工具**：车队无线电、领航路书与端侧小语言模型伴生广播 |
 | **`ds5bridge.exe`** | Windows / Proton | **共享内存桥接程序**：用于 AC / ACC / AC Rally，读取共享内存并转为 UDP 回传 |
 | `profiles/` | 全部 | 自定义 Profile 模版文件（12 种常见内置配置已静态编译入二进制） |
@@ -710,6 +710,7 @@ profiles/                 用户自定义 Profile 目录
 | `udev/71-ds5vpad.rules` | Linux | 权限配置文件，配置普通用户对 `/dev/uinput` 虚拟手柄的创建权限 |
 | `scripts/ds5-acr.sh` / `ds5-acr.ps1` | Linux / Windows | ACR / AC / ACC 一键启停与状态诊断脚本 |
 | `scripts/launch-bridge.sh` | Linux | 便捷启动脚本，自动定位 Steam AppID 前缀并启动桥接程序 |
+| `scripts/ds5-rbr.ps1` | Windows | 理查德·伯恩斯拉力赛 (RBR) 一键启停与 DirectInput 8 虚拟手柄/遥测诊断脚本 |
 | `scripts/start-llm.sh` | Linux | 本地端侧小语言模型（Qwen2.5-0.5B）守护进程启停脚本 |
 
 ### 常见场景组件选配

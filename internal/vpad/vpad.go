@@ -16,7 +16,7 @@
 //
 // Platform support:
 //   - Linux: implemented via /dev/uinput.
-//   - Windows: implemented with ViGEmBus / ViGEmClient.dll (XInput), planned vJoy / ViGEm DS4 (DirectInput 8).
+//   - Windows: implemented with ViGEmBus / ViGEmClient.dll (XInput Xbox 360 & DirectInput 8 DualShock 4).
 package vpad
 
 import (
@@ -91,6 +91,9 @@ func DefaultConfig() Config {
 }
 
 // DInput8Config returns a classic DirectInput 8 identity (Logitech Dual Action).
+// Note: On Windows, the ViGEmBus backend emulates a DualShock 4 target and
+// automatically retains Sony's native VID/PID (0x054c:0x05c4) so Windows loads
+// hidclass.sys/hidusb.sys correctly.
 func DInput8Config() Config {
 	return Config{
 		Protocol: ProtocolDInput8,

@@ -7,7 +7,7 @@
 // other process writes the controller's HID output.
 //
 // Linux uses /dev/uinput (install udev/71-ds5vpad.rules first). The Windows
-// backend uses ViGEmBus (XInput) and DirectInput 8 (vJoy).
+// backend uses ViGEmBus (XInput via Xbox 360 target, DirectInput 8 via DualShock 4 target).
 package main
 
 import (

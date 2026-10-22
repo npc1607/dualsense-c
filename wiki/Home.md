@@ -13,13 +13,15 @@
 | 音频 AI | YAMNet（进程内，ONNX Runtime）识别地面材质与枪声/爆炸 |
 | 力反馈镜像 | 虚拟手柄捕获游戏标准震动 → 触感 + 后坐力 |
 | **直驱力矩降维模拟** | 将专业直驱方向盘 FFB 对齐力矩与推头失速骤降映射为扳机阻尼与音圈抓地力 |
+| **伴生语音与电台广播** | 通过手柄内置扬声器（Ch1/Ch2）播放车队无线电、领航路书与战术预警，与音圈物理正交；支持声明式规则与端侧小语言模型（Qwen2.5-0.5B） |
+| **FPS 辅助瞄准增强** | 双层复合 S 曲线算法，低速微调死区控制与高速快速转向，阻尼动态平滑 |
 | 遥测接入 | Forza / BeamNG / AC·ACC·ACR / RBR（NGP UDP 6776）/ 自定义 UDP |
 
 ## 30 秒上手
 
 ```bash
-make                 # 编译 bin/ds5d、bin/ds5ctl
-make install-udev    # 一次性：普通用户读写 /dev/hidraw*
+make                 # 编译 bin/ds5d、bin/ds5ctl、bin/ds5vpad、bin/ds5radio、bin/ffclient
+make install-udev    # 一次性：配置 70-dualsense.rules 与 71-ds5vpad.rules
 ./bin/ds5ctl test    # 手柄自检
 ./bin/ds5d -profile fps   # 任意射击游戏
 ```
@@ -32,4 +34,6 @@ make install-udev    # 一次性：普通用户读写 /dev/hidraw*
 - 赛车直驱模拟与抓地力极限 → [直驱 FFB 力矩与抓地力曲线](Direct-Drive-FFB)
 - 玩 AC/ACC/ACR → [共享内存游戏](ACR-AC-ACC)
 - 玩 RBR / RSF 拉力赛 → [理查德·伯恩斯拉力赛](RBR)
+- 想要伴生语音与车队电台 → [车载电台与伴生系统](Companion-Audio-Agent) · [电台架构设计](Radio-Agent-Architecture)
+- 想要 FPS 瞄准辅助与手感曲线 → [FPS 辅助瞄准增强](FPS-Aim-Assist)
 - 出问题了 → [故障排查](Troubleshooting)

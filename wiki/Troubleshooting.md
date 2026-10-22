@@ -46,9 +46,16 @@
 | 现象 | 处理 |
 |---|---|
 | 桥一直 `shared memory not found` | 还没进赛道（正常）；或确认 AppID 正确 |
-| 桥日志停止增长但进程还在 | 桥卡死 → `./scripts/ds5-acr.sh bridge-restart` |
+| 桥日志停止增长但进程还在 | 桥卡死 → 重新执行 `./scripts/ds5-acr.sh bridge` 注入或通过 `./scripts/ds5-acr.sh restart` 重启 |
 | `signals: (none)` | 桥没连上或 ds5d 未监听 9999；`ds5-acr.sh status` |
 | 遥测数值异常波动 | 用 `ds5ctl sniff -listen :9999` 或桥的 `-debug` 核对字段 |
+
+## 伴生音频与端侧模型（ds5radio / LLM）
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 手柄内置扬声器无声音 | 默认音频 Sink 未正确定位到手柄 | 使用 `ds5radio test` 诊断，或通过 `-sink <name>` 显式指定 DualSense 声卡 Sink |
+| 本地端侧模型无法连通 | `llama-server` 未启动或端口被占用 | 运行 `./scripts/start-llm.sh status` 或 `./scripts/start-llm.sh start` 检查端口 9995 监听 |
 
 ## 通用排查手段
 

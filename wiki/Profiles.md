@@ -32,13 +32,39 @@ rules:
 | 字段 | 说明 |
 |---|---|
 | `when` | 表达式，为真时规则生效；省略=恒真 |
-| `target` | `l2` `r2` `rumble_left` `rumble_right` `haptic_left` `haptic_right` `lightbar` `player_leds` `mute_led` |
-| `effect` | 扳机模式：`off` `rigid` `section` `feedback` `weapon` `vibration` `slope_feedback` `slope_weapon` `machine` |
-| `params` | 效果参数，值为表达式 |
+| `target` | `l2` `r2` `rumble_left` `rumble_right` `haptic_left` `haptic_right` `lightbar` `player_leds` `mute_led` `speak` `radio` |
+| `effect` | 扳机模式：`off` `rigid` `section` `feedback` `weapon` `vibration` `slope_feedback` `slope_weapon` `machine`（仅扳机有效） |
+| `params` | 效果参数，值为表达式（扳机模式参数） |
 | `value` | 马达/音圈/LED 的数值表达式 |
-| `priority` | 同一 target 上高优先级**整组覆盖**低优先级 |
+| `priority` | 同一 target 上高优先级**整组覆盖**低优先级（抢占打断机制） |
 | `hold` | 条件转假后继续保持的时长（做脉冲用） |
 | `modulate` | 调幅：`{type: sine|square, hz, depth}` |
+| `clip` | 音频切片名（如 `tire_slip`, `low_hp_warning`，对应 assets/radio/*.wav） |
+| `cooldown` | 冷却时长（如 `8s`, `15s`），防止短时间重复触发轰炸 |
+| `text` | 自然语言提示词/转录台词，供端侧 LLM 推理与事件日志追踪 |
+
+### 伴生语音与电台规则示例
+
+```yaml
+rules:
+  # 肉鸽游戏濒死警报：手柄内置扬声器伴生提醒
+  - name: isaac-low-hp
+    when: "hp > 0 && hp <= 1.0"
+    target: speak
+    clip: "low_hp_warning"
+    priority: 85
+    cooldown: 8s
+    text: "生命值垂危，快找红心！"
+
+  # 赛车严重打滑：车队对讲机警报
+  - name: radio-tire-slip
+    when: "speed > 20 && (slip > 1.2 || max(slip_fl, slip_fr) > 1.5)"
+    target: radio
+    clip: "tire_slip"
+    priority: 80
+    cooldown: 10s
+    text: "注意，后轮严重打滑，稳住方向！"
+```
 
 ## 表达式
 

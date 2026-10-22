@@ -18,9 +18,10 @@ Source ──► Signal ──► Rules ──► Sink
 
 ```
 cmd/
-  ds5d/         主守护进程
-  ds5ctl/       设备检测、自检、抓包校准
-  ds5vpad/      虚拟手柄 + 力反馈捕获
+  ds5d/         主守护进程（负责 Source → Rules → Sink 链路调度）
+  ds5ctl/       设备检测、硬件自检、抓包校准与规则离线校验
+  ds5vpad/      虚拟手柄 + 力反馈捕获（uinput / dinput8 / xinput）
+  ds5radio/     伴生广播与情境语音工具（车队电台/领航员/端侧 LLM）
   ds5bridge/    Proton 前缀内的共享内存桥（Windows 目标）
 internal/
   audioai/      YAMNet 推理（ONNX Runtime C API，-tags onnx）
@@ -28,15 +29,19 @@ internal/
   device/       跨平台 HID（Linux hidraw / Windows HID API）
   hid/          输出报告与扳机参数库
   input/        输入报告解析
-  profile/      Profile 结构、内置 YAML、校验
+  profile/      Profile 结构、12 款内置 YAML、校验
+  radio/        伴生广播：DSP 滤镜混音、占线仲裁器、LLM 客户端与情境分类器
   rules/        表达式引擎、优先级、锁存与衰减
   signal/       信号词表与时间序列
   sink/         时钟驱动；haptics/ 音圈合成与直通
   source/       trigger / udp / audio / ffb / audio_ai / combo / sim
   vpad/         虚拟手柄后端（Linux uinput / Windows 占位）
+assets/radio/   伴生广播与车队电台音频切片资产（.wav）
 docs/           设计与踩坑文档（必读）
 profiles/       用户自定义 profile
+scripts/        运维与启停脚本（ds5-acr.sh, launch-bridge.sh, start-llm.sh）
 tools/          bridgesim / ffclient / hidprobe / yamnet_bridge
+udev/           udev 权限规则（70-dualsense.rules, 71-ds5vpad.rules）
 ```
 
 ## 构建与测试

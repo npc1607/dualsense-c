@@ -91,6 +91,6 @@ Profile 里的阈值都按这个标定。
 
 ## 常见坑
 
-- **桥在游戏重启后卡死**：日志不再增长但进程还在 → `bridge-restart`
+- **桥在游戏重启后卡死**：日志不再增长但进程还在 → 重新执行 `./scripts/ds5-acr.sh bridge` 注入或通过 `./scripts/ds5-acr.sh restart` 重启
 - **`surface` / `carDamage` 在 ACR 恒为 0**：这两类字段该作无实现，规则会静默失效
 - **Steam Input 必须开着**（ACR 只认虚拟 Xbox 手柄），但我们的触感走 hidraw，不受影响

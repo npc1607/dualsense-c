@@ -74,7 +74,7 @@
 ### 2. 编译构建
 
 ```bash
-make            # 编译生成 bin/ds5d 与 bin/ds5ctl
+make            # 编译生成 bin/ds5d、bin/ds5ctl、bin/ds5vpad、bin/ds5radio、bin/ffclient 以及 bin/ds5bridge.exe
 make windows    # 交叉编译生成 bin/ds5d.exe 与 bin/ds5ctl.exe（纯 Go，无需外部工具链）
 ```
 
@@ -83,7 +83,7 @@ make windows    # 交叉编译生成 bin/ds5d.exe 与 bin/ds5ctl.exe（纯 Go，
 ```bash
 make install-udev
 # 等价于：
-#   sudo cp udev/70-dualsense.rules /etc/udev/rules.d/
+#   sudo cp udev/70-dualsense.rules udev/71-ds5vpad.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
@@ -119,14 +119,22 @@ make install-udev
 
 **共享内存竞速游戏（AC / ACC / AC Rally）**
 
-推荐用一键脚本（自动管进程、日志与崩溃的桥）：
+推荐使用一键脚本进行两段式启停（避免 Proton 前缀锁冲突，自动管理守护进程与桥）：
 
 ```bash
-./scripts/ds5-acr.sh start      # ds5d + 桥一起起（AppID 默认 3917090 = AC Rally）
-./scripts/ds5-acr.sh status     # 看进程、signals、桥是否卡住
-./scripts/ds5-acr.sh stop       # 全部停掉，手柄交还 Steam
-./scripts/ds5-acr.sh bridge-restart   # 桥卡死时只重启桥（游戏重启后常见）
-./scripts/ds5-acr.sh logs       # 同时 tail 两个日志
+# 两段式启动：
+./scripts/ds5-acr.sh start      # 阶段 1：启动 Linux 原生 ds5d 守护进程（AppID 默认 3917090 = AC Rally）
+# 在 Steam 中正常启动游戏（AC Rally / AC / ACC）并进入赛段后：
+./scripts/ds5-acr.sh bridge     # 阶段 2：向 Proton 前缀注入共享内存桥
+
+# 或使用全自动模式（启动 ds5d 并自动监听等待游戏启动后注入桥）：
+./scripts/ds5-acr.sh auto
+
+./scripts/ds5-acr.sh status     # 查看进程运行状态、游戏运行状态与当前信号
+./scripts/ds5-acr.sh stop       # 全部停止，手柄交还 Steam
+./scripts/ds5-acr.sh logs       # 同时实时跟踪 ds5d 与桥日志
+# 若游戏重启后桥断连卡死，重新执行 bridge 注入或 restart 即可：
+./scripts/ds5-acr.sh bridge
 
 # 可用环境变量覆盖：DS5_APPID / DS5_PROFILE / DS5_RATE
 DS5_APPID=805550 DS5_RATE=250 ./scripts/ds5-acr.sh start
@@ -288,6 +296,7 @@ go run ./tools/bridgesim -port 9999
 | `-dry-run` | 禁用 | 纯逻辑仿真模式，不打开物理控制器，控制台打印输出帧 |
 | `-trace` | 禁用 | 调试开关，周期性输出当前计算的信号采样值 |
 | `-list` | 禁用 | 输出所有内置 Profile 列表后退出 |
+| `-ipc-broadcast` | `127.0.0.1:9997` | IPC 遥测信号广播端点（SIG1 协议），用于向伴生工具（如 ds5radio）广播信号流（为空则禁用） |
 | `-version` | 禁用 | 打印当前版本信息后退出 |
 
 ### `ds5ctl`（设备与配置工具）
@@ -317,6 +326,29 @@ Uinput 虚拟 Xbox 360 手柄 + 独占物理手柄，把手柄输入转发给游
 | `-hz` | `60` | 发布频率 |
 
 `ffclient` 用于不开游戏验证力反馈链路：`./bin/ffclient -dev /dev/input/eventN`。
+
+### `ds5radio`（伴生广播 / 赛车领航与情境语音助手）
+
+通过 DualSense 控制器内置前置扬声器（音频通道 1 & 2：FL/FR）播放车队电台（Team Radio）、路书领航（Pacenotes）、战术与强敌警报，与通道 3 & 4 触觉双音圈物理正交共存。支持内置规则音频切片合成，以及外接端侧本地小语言模型（Qwen2.5-0.5B）进行动态拟真无线电对话。
+
+| 子命令 | 说明 |
+|---|---|
+| `test` | 在手柄前置扬声器上播放车队无线电/拉力领航测试语音（带真实对讲机 PTT 握掣杂音） |
+| `play <clip>` | 播放指定的内置音频切片（如 `tire_slip`, `box_this_lap`, `engine_redline`） |
+| `list` | 列出 `assets/radio/` 目录下全部可用音频切片 |
+| `listen` | 启动实时遥测监听器，根据信号规则或 LLM 自动广播情境语音 |
+
+| 常用参数 | 默认值 | 说明 |
+|---|---|---|
+| `-ipc` | `127.0.0.1:9997` | 连接 ds5d 的 IPC 遥测广播端点（留空则回退监听 UDP 遥测） |
+| `-listen` | `127.0.0.1:9999` | UDP 遥测接收地址（当 `-ipc` 为空时生效） |
+| `-decoder` | `acshm` | UDP 遥测解码器（`acshm`、`forza`、`dirt`、`outgauge`） |
+| `-persona` | `rally` | 伴生人格：`rally`（拉力领航）、`f1`（F1 比赛工程师）、`mech`（机甲车载 AI）、`souls`（魂系伴生）、`isaac`（肉鸽伴生） |
+| `-llm` | 禁用 | 启用端侧本地小语言模型动态情境推理与语音生成 |
+| `-llm-endpoint` | `127.0.0.1:9995` | 本地 LLM HTTP 推理服务端点（环境变量 `$DS5_LLM_ENDPOINT`） |
+| `-llm-model` | `qwen2.5:0.5b` | LLM 模型标识符（环境变量 `$DS5_LLM_MODEL`） |
+| `-sink` | 自动识别 | 覆盖音频输出 Sink（默认自动路由至 DualSense 内置声卡） |
+| `-clips` | 自动识别 | 指定 `.wav` 无线电切片存放目录（默认扫描 `assets/radio`） |
 
 ---
 
@@ -349,7 +381,7 @@ signals: [custom_boost]      # 可选：声明自定义扩展信号名
 rules:
   - name: l2-brake
     when: 'has("brake") && brake > 0.01'     # 激活条件，未定义则始终匹配
-    target: l2                               # 输出目标：l2 | r2 | rumble_left | rumble_right | lightbar | player_leds | mute_led
+    target: l2                               # 输出目标：l2 | r2 | rumble_left | rumble_right | haptic_left | haptic_right | lightbar | player_leds | mute_led | speak | radio
     effect: rigid                            # 扳机模式（见效果表）
     priority: 10                             # 执行优先级，数值大者优先覆盖
     hold: 0ms                                # 脉冲类信号触发后的最短保持时长
@@ -364,6 +396,15 @@ rules:
     hold: 130ms
     value: "230"
     modulate: { type: sine, hz: 24, depth: 0.65 }
+
+  # 伴生语音与车队电台广播（通过手柄正面扬声器播放，不占用双音圈触感）
+  - name: low-hp-warning
+    when: "has('hp') && hp > 0 && hp <= 1.0"
+    target: speak                            # speak: 伴生语音 / radio: 车队对讲机
+    clip: "low_hp_warning"                   # 音频切片名（位于 assets/radio/*.wav）
+    priority: 85                             # 执行优先级（数值大者可抢占播报）
+    cooldown: 8s                             # 防重复触发冷却时长
+    text: "生命值垂危，快找红心！"             # 自然语言说明（供 LLM 理解与日志记录）
 ```
 
 ### 音圈触感（`haptics:` 块）
@@ -472,14 +513,15 @@ modulate: { type: square, hz: 30, depth: 1.0 }  # 方波调幅（适用于机械
 
 | 类别 | 信号名称与取值规范 |
 |---|---|
-| **车辆遥测** | `throttle`, `brake`, `clutch`, `slip`, `lockup`, `abs`, `tc`, `rumble`：归一化至 `[0, 1]`<br>`steer`：方向盘转角，取值范围 `[-1, 1]`<br>`speed`：时速（km/h）<br>`rpm`：转速，按红线转速归一化至 `[0, 1]`<br>`gear`：档位数值<br>`accel_g`, `lat_g`：加速度 G 值<br>`surface`：路面材质标识 |
+| **车辆遥测** | `throttle`, `brake`, `clutch`, `slip`, `lockup`, `abs`, `tc`, `rumble`：归一化至 `[0, 1]`<br>`steer`：方向盘转角，取值范围 `[-1, 1]`<br>`speed`：时速（km/h）<br>`rpm`：转速，按红线转速归一化至 `[0, 1]`<br>`gear`：档位数值<br>`accel_g`, `lat_g`：加速度 G 值<br>`surface`：路面材质标识<br>`slip_fl`, `slip_fr`, `slip_rl`, `slip_rr`：四轮独立滑移率（`0.0 ~ 1.0`） |
 | **手柄按键与摇杆** | `l2`, `r2`：模拟量行程，取值范围 `[0, 1]`<br>`l2_full`, `r2_full`：行程触底开关（bool）<br>`l1`, `r1`, `cross`, `circle`, `square`, `triangle`, `up`, `down`, `left`, `right`, `ps`, `touchpad`, `mute`：按键状态（bool）<br>`lx`, `ly`, `rx`, `ry`：摇杆坐标，取值范围 `[-1, 1]`<br>`stick_l`, `stick_r`：摇杆下压开关（bool） |
 | **手柄传感器与状态** | `gyro_x`, `gyro_y`, `gyro_z`：6 轴角速度（小端 int16 归一化至 `[-1, 1]`）<br>`accel_x`, `accel_y`, `accel_z`：6 轴线性加速度（小端 int16 归一化至 `[-1, 1]`）<br>`touch_x`, `touch_y`：触控板首个触点归一化坐标 `[0, 1]`（基于 1920×1080 分辨率）<br>`touch_active`：触控板是否处于触摸接触状态（bool）<br>`battery`：电池电量等级（`0.0 ~ 1.0`，以 10% 步长递增）<br>`charging`：电池充电中标志（bool） |
 | **音频包络（source/audio）** | `bass`（20~110Hz）、`mid`（160~450Hz）、`loudness`（全带）：归一化 `[0, 1]`，已做 attack/release 平滑 |
 | **瞬态检测（source/audio）** | `onset`：fast/slow 包络之差，对背景音量免疫，用于枪声/撞击起音 |
-| **音频 AI（YAMNet, `-tags onnx`）** | `surface_water/metal/wood/gravel`、`audio_gunshot/explosion/impact`：模型置信度 `[0, 1]` |
+| **音频 AI（YAMNet, `-tags onnx`）** | `surface_water`, `surface_metal`, `surface_wood`, `surface_gravel`：地面物理材质置信度（`0.0 ~ 1.0`）<br>`audio_gunshot`, `audio_explosion`, `audio_impact`：交火与受击事件置信度（`0.0 ~ 1.0`） |
 | **力反馈（source/ffb）** | `ffb_left`、`ffb_right`：虚拟手柄捕获到的游戏 rumble 幅度，`[0, 1]` |
-| **音频 AI 材质与战况** | `surface_water`, `surface_metal`, `surface_wood`, `surface_gravel`：地面物理材质置信度（`0.0 ~ 1.0`）<br>`audio_gunshot`, `audio_explosion`, `audio_impact`：交火与受击事件置信度（`0.0 ~ 1.0`） |
+| **电台与战术进站** | `box`：车队无线电进站指令（bool / 0 或 1）<br>`pit`：赛车处于维修区标志（bool / 0 或 1） |
+| **全品类伴生信号** | `hp`：角色生命值 / 血量（以撒红心、魂系 HP 等）<br>`stamina`：角色精力 / 体力值（`0.0 ~ 1.0`）<br>`mana`：角色法力 / 能量值（`0.0 ~ 1.0`）<br>`hazard`：强敌 / Boss 房 / 高危环境预警等级（`0.0 ~ 1.0`） |
 | **自定义扩展** | `custom0` ~ `custom3`：供特殊遥测项绑定的用户自定义通道 |
 
 各解码器的具体映射实现可参阅 `internal/source/udp/decoders.go`。
@@ -560,6 +602,8 @@ bin/ds5d.exe -profile fps -trace
 cmd/
   ds5d/                   主守护进程（负责 Source → Rules → Sink 链路调度）
   ds5ctl/                 维护与辅助工具（设备检测、配置预检、抓包校准）
+  ds5vpad/                虚拟手柄与力反馈捕获（uinput / dinput8 / xinput）
+  ds5radio/               伴生广播与情境语音工具（车队电台/领航员/端侧 LLM）
   ds5bridge/              Windows 共享内存桥接器（在 Proton / Wine 前缀内运行）
 internal/
   bridge/                 桥接通信协议定义与共享内存结构（AC/ACC/ACR）
@@ -568,6 +612,7 @@ internal/
   input/                  DualSense 原始输入报告解析
   signal/                 标准信号字典与时间序列前置处理
   profile/                Profile 结构体定义与内置 YAML 解析
+  radio/                  伴生广播系统（DSP 渲染、PTT 滤镜、仲裁器与 LLM 分类器）
   rules/                  表达式解析引擎、优先级控制与状态锁存衰减
   audioai/                YAMNet 推理引擎（ONNX Runtime C API，-tags onnx）
   sink/                   高精度时钟驱动与退出状态重置
@@ -581,11 +626,16 @@ internal/
     audioai/              音频 AI 事件与材质探测驱动源（YAMNet/ONNX）
     ffb/                  力反馈源（虚拟手柄捕获的 rumble → ffb_left/right）
     sim/                  离线仿真数据源
-udev/70-dualsense.rules   Linux 非 root 读写权限规则
+assets/radio/             伴生广播与电台音频切片资产（.wav）
+udev/
+  70-dualsense.rules      Linux 非 root 读写权限规则
+  71-ds5vpad.rules        虚拟手柄 uinput 访问权限规则
 scripts/launch-bridge.sh  Proton 前缀桥接启动脚本
-scripts/ds5-acr.sh        ACR/AC/ACC 一键启停（start/stop/status/logs）
+scripts/ds5-acr.sh        ACR/AC/ACC 两段式一键启停脚本
+scripts/start-llm.sh      本地伴生小模型（Qwen2.5-0.5B）运维脚本
 tools/
   bridgesim/              共享内存桥接数据流本地仿真器
+  ffclient/               力反馈链路测试客户端
   yamnet_bridge/          Audio AI 伴生探测器（YAMNet ONNX 实时/模拟推理）
 profiles/                 用户自定义 Profile 目录
 ```
@@ -615,7 +665,8 @@ profiles/                 用户自定义 Profile 目录
 - [ ] **触控板虚拟机械齿轮刻度感 (Virtual Detents)**：电容坐标微分与音圈单周期脉冲结合，呈现拟真机械棘轮、换挡旋钮与关键帧吸附手感
 - [ ] **空间声学触觉雷达 (7.1声道)**：环绕声空间低延迟分解，为盲操与竞技提供空间指向性触觉
 - [ ] **枪械机械卡壳与战术排障模拟**：开火过热触发 R2 扳机物理硬性锁死，结合 6 轴 IMU 甩动检测拉栓解卡
-- [ ] **赛车直驱模拟器力矩降维模拟**：将专业 FFB 对齐力矩曲线降维映射至自适应阻力与音圈抓地力极限
+- [x] **全品类手柄伴生声学播报系统（Companion Audio Agent）**：通过 DualSense 前置扬声器（Ch1/Ch2）播放车队无线电、路书领航与战术预警，与 Ch3/Ch4 触觉音圈物理正交；支持声明式 `target: speak` / `target: radio` 规则与端侧小语言模型（Qwen2.5-0.5B）`ds5radio`
+- [x] **赛车直驱模拟器力矩降维模拟**：将专业 FFB 对齐力矩曲线降维映射至自适应阻力与音圈抓地力极限（详见 `wiki/Direct-Drive-FFB.md`）
 - [ ] **手感黑胶唱片与录制回放系统**：250Hz 控制时序录制与一键预设分发
 - [ ] **双人手柄力矩纠缠网络 (Haptic Tether)**：局域网物理力矩同步对抗与协同驾驶
 - [ ] **触控板多指手势识别**：支持双指滑动、捏合映射为虚拟轮盘/旋钮
@@ -668,10 +719,15 @@ profiles/                 用户自定义 Profile 目录
 |---|---|---|
 | **`ds5d` / `ds5d.exe`** | 全部 | **核心守护程序**：加载 Profile，接收数据源信号，执行规则运算并以 125~250 Hz 写入控制器 |
 | **`ds5ctl` / `ds5ctl.exe`** | 全部 | **设备与配置工具**：设备枚举、硬件自检、离线规则验证及遥测抓包校准 |
+| **`ds5vpad`** | Linux | **虚拟手柄与力反馈捕获工具**：创建虚拟手柄转发按键并捕获震动供 ffb 源消费 |
+| **`ds5radio`** | 全部 | **伴生广播与情境语音工具**：车队无线电、领航路书与端侧小语言模型伴生广播 |
 | **`ds5bridge.exe`** | Windows / Proton | **共享内存桥接程序**：用于 AC / ACC / AC Rally，在 Proton 前缀内读取共享内存并转为 UDP 回传 |
-| `profiles/` | 全部 | 自定义 Profile 模版文件（6 种常见内置配置已静态编译入二进制） |
+| `profiles/` | 全部 | 自定义 Profile 模版文件（12 种常见内置配置已静态编译入二进制） |
 | `udev/70-dualsense.rules` | Linux | 权限配置文件，配置普通用户对 `/dev/hidraw*` 的读写权限 |
+| `udev/71-ds5vpad.rules` | Linux | 权限配置文件，配置普通用户对 `/dev/uinput` 虚拟手柄的创建权限 |
+| `scripts/ds5-acr.sh` | Linux | ACR/AC/ACC 两段式启动、状态监控与桥注入一键脚本 |
 | `scripts/launch-bridge.sh` | Linux | 便捷启动脚本，自动定位 Steam AppID 前缀并启动桥接程序 |
+| `scripts/start-llm.sh` | Linux | 本地端侧小语言模型（Qwen2.5-0.5B）守护进程启停脚本 |
 
 ### 常见场景组件选配
 

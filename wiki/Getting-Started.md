@@ -9,7 +9,7 @@
 ## 1. 构建
 
 ```bash
-make            # bin/ds5d、bin/ds5ctl
+make            # 编译 bin/ds5d, ds5ctl, ds5vpad, ds5radio, ffclient 以及 bin/ds5bridge.exe
 make bridge     # bin/ds5bridge.exe（AC/ACC/ACR 用，Windows 目标）
 make build-onnx # bin/ds5d-onnx（可选：进程内音频 AI，需 onnxruntime）
 ```
@@ -53,8 +53,11 @@ make install-udev
 # 赛车载具遥测（Forza）
 ./bin/ds5d -profile forza-horizon
 
-# AC / ACC / AC Rally（一键）
-./scripts/ds5-acr.sh start      # AppID 默认 3917090 = AC Rally
+# AC / ACC / AC Rally（两段式 / 自动模式）
+./scripts/ds5-acr.sh start      # 启动 ds5d 守护进程（AppID 默认 3917090 = AC Rally）
+./scripts/ds5-acr.sh bridge     # 游戏启动并进入赛段后，注入共享内存桥
+# 或直接使用全自动侦测模式：
+./scripts/ds5-acr.sh auto       # 启动 ds5d 并自动侦测游戏进程后注入桥
 ./scripts/ds5-acr.sh status
 ./scripts/ds5-acr.sh stop
 ```

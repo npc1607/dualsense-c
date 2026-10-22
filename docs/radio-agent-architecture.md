@@ -163,6 +163,6 @@ type Classifier interface {
 
 - [x] **架构方案与规范确立**：完成端到端数据架构流转图与协作时序图（已完成）。
 - [x] **声学通道实测验证**：验证 DualSense Ch1/Ch2 内置扬声器物理出声，完成程序化 PTT 电台滤镜与音频生成器（`scripts/gen-radio-clips.py`）。
-- [ ] **IPC SIG1 协议实装**：在 `internal/vpad/ipc` 中正式接入 `BroadcastSignals` 与 `ReadSignalFrame`，在 `ds5d` 中开放广播端点。
-- [ ] **Go 伴生广播器（`cmd/ds5radio`）**：实现内置 `RuleClassifier` 基础规则库与对讲机占线排斥锁。
-- [ ] **LLM/SLM 情境推理接入**：引入端侧轻量语义模型与自然语言动态对讲机响应。
+- [x] **IPC SIG1 协议实装**：在 `internal/vpad/ipc` 中正式接入 `BroadcastSignals` 与 `ReadSignalFrame`，在 `ds5d` 中开放广播端点（`-ipc-broadcast`）。
+- [x] **Go 伴生广播器（`cmd/ds5radio`）**：实现内置 `RuleClassifier` 基础规则库、对讲机占线排斥锁与声明式 Profile 语音驱动。
+- [x] **LLM/SLM 情境推理接入**：引入端侧轻量语义模型（Qwen2.5-0.5B）与自然语言动态对讲机响应，提供 `scripts/start-llm.sh` 运维工具。

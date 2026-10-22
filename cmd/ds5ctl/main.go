@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/npc1607/dualsense-c/internal/vpad/ipc"
 
 	"github.com/npc1607/dualsense-c/internal/device"
 	"github.com/npc1607/dualsense-c/internal/hid"
@@ -49,6 +52,8 @@ func main() {
 		err = cmdWatch(os.Args[2:])
 	case "sniff":
 		err = cmdSniff(os.Args[2:])
+	case "health":
+		err = cmdHealth(os.Args[2:])
 	case "version", "-version", "--version":
 		fmt.Printf("ds5ctl %s\n", version)
 	default:
@@ -70,6 +75,7 @@ func usage() {
   test       rumble + trigger ramp self-test
   bench      cycle every trigger effect so you can pick the right one
   watch      print decoded input reports (calibrates button bits)
+  health     query running ds5d daemon health and metrics
   sniff      hexdump incoming game telemetry (calibrates UDP offsets)
   version    print the build version
 `)
@@ -93,26 +99,51 @@ func cmdList(args []string) error {
 func cmdProfiles(args []string) error {
 	fs := flag.NewFlagSet("profiles", flag.ExitOnError)
 	dir := fs.String("dir", "", "also list profiles in this directory")
+	jsonOut := fs.Bool("json", false, "output JSON format")
 	_ = fs.Parse(args)
 
 	builtin, err := profile.Builtin()
 	if err != nil {
 		return err
 	}
+
+	var custom []*profile.Profile
+	if *dir != "" {
+		c, err := profile.Dir(*dir)
+		if err != nil {
+			return err
+		}
+		custom = c
+	}
+
+	if *jsonOut {
+		type profInfo struct {
+			Name        string `json:"name"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Source      string `json:"source"`
+		}
+		var list []profInfo
+		for _, p := range builtin {
+			list = append(list, profInfo{Name: p.Name, Title: p.Title, Description: p.Description, Source: p.Source.Type})
+		}
+		for _, p := range custom {
+			list = append(list, profInfo{Name: p.Name, Title: p.Title, Description: p.Description, Source: p.Source.Type})
+		}
+		out, _ := json.Marshal(list)
+		fmt.Println(string(out))
+		return nil
+	}
+
 	fmt.Println("builtin:")
 	for _, p := range builtin {
 		fmt.Printf("  %-10s %s\n", p.Name, p.Title)
 	}
-	if *dir == "" {
-		return nil
-	}
-	custom, err := profile.Dir(*dir)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%s:\n", *dir)
-	for _, p := range custom {
-		fmt.Printf("  %-10s %s\n", p.Name, p.Title)
+	if len(custom) > 0 {
+		fmt.Printf("%s:\n", *dir)
+		for _, p := range custom {
+			fmt.Printf("  %-10s %s\n", p.Name, p.Title)
+		}
 	}
 	return nil
 }
@@ -121,6 +152,7 @@ func cmdCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	name := fs.String("profile", "fps", "profile name or path")
 	dir := fs.String("profiles", "", "profile directory")
+	jsonOut := fs.Bool("json", false, "output JSON format")
 	_ = fs.Parse(args)
 
 	p, err := profile.Resolve(*name, *dir)
@@ -131,6 +163,16 @@ func cmdCheck(args []string) error {
 	logger := log.New(os.Stderr, "check: ", 0)
 	if _, err := rules.New(p, set, logger); err != nil {
 		return err
+	}
+	if *jsonOut {
+		out, _ := json.Marshal(map[string]any{
+			"ok":     true,
+			"name":   p.Name,
+			"rules":  len(p.Rules),
+			"source": p.Source.Type,
+		})
+		fmt.Println(string(out))
+		return nil
 	}
 	fmt.Printf("ok: %s (%d rules, source %q)\n", p.Name, len(p.Rules), p.Source.Type)
 	return nil
@@ -223,6 +265,27 @@ var benchEntries = []benchEntry{
 	{"machine(2..6 freq=20 period=5)", hid.ModeMachine, [10]byte{2, 6, 20, 5}},
 }
 
+func tryDaemonRPC(ctx context.Context) (net.Conn, bool) {
+	dialCtx, cancel := context.WithTimeout(ctx, 60*time.Millisecond)
+	defer cancel()
+	conn, err := ipc.Dial(dialCtx, ipc.DefaultSignalEndpoint)
+	if err != nil {
+		return nil, false
+	}
+	_ = conn.SetDeadline(time.Now().Add(100 * time.Millisecond))
+	if err := ipc.WriteCommand(conn, ipc.Command{ID: "probe", Method: "health"}); err != nil {
+		_ = conn.Close()
+		return nil, false
+	}
+	resp, err := ipc.ReadResponse(conn)
+	_ = conn.SetDeadline(time.Time{})
+	if err != nil || !resp.OK {
+		_ = conn.Close()
+		return nil, false
+	}
+	return conn, true
+}
+
 func cmdBench(args []string) error {
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
 	path := fs.String("hidraw", "", "device path")
@@ -230,13 +293,44 @@ func cmdBench(args []string) error {
 	dur := fs.Duration("each", 2*time.Second, "time per effect")
 	_ = fs.Parse(args)
 
+	ctx := interruptContext()
+	if conn, ok := tryDaemonRPC(ctx); ok {
+		defer conn.Close()
+		fmt.Printf("connected to active ds5d daemon on %s (single HID owner mode)\n", ipc.DefaultSignalEndpoint)
+		for _, e := range benchEntries {
+			fmt.Printf("-> %s\n", e.label)
+			params := make(map[string]string)
+			for i, val := range e.p {
+				params[fmt.Sprintf("p%d", i)] = fmt.Sprintf("%d", val)
+			}
+			req := ipc.Command{
+				ID:     "bench",
+				Method: "effect.preview",
+			}
+			req.Params, _ = json.Marshal(map[string]any{
+				"target": *trigger,
+				"mode":   e.mode.String(),
+				"params": params,
+				"ttl_ms": int(dur.Milliseconds()),
+			})
+			_ = ipc.WriteCommand(conn, req)
+			_, _ = ipc.ReadResponse(conn)
+
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(*dur + 300*time.Millisecond):
+			}
+		}
+		return nil
+	}
+
 	dev, err := openDevice(*path)
 	if err != nil {
 		return err
 	}
 	defer dev.Close()
 
-	ctx := interruptContext()
 	tick := time.NewTicker(8 * time.Millisecond)
 	defer tick.Stop()
 	write := func(f hid.Frame) { _ = dev.Write(report.Build(dev.Info(), f)) }
@@ -274,10 +368,87 @@ func cmdBench(args []string) error {
 	return nil
 }
 
+func cmdHealth(args []string) error {
+	fs := flag.NewFlagSet("health", flag.ExitOnError)
+	endpoint := fs.String("endpoint", ipc.DefaultSignalEndpoint, "daemon IPC endpoint")
+	jsonOut := fs.Bool("json", false, "output JSON format")
+	_ = fs.Parse(args)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	conn, err := ipc.Dial(ctx, *endpoint)
+	if err != nil {
+		return fmt.Errorf("connect to ds5d at %s: %w", *endpoint, err)
+	}
+	defer conn.Close()
+
+	if err := ipc.WriteCommand(conn, ipc.Command{ID: "health", Method: "health"}); err != nil {
+		return err
+	}
+	resp, err := ipc.ReadResponse(conn)
+	if err != nil {
+		return err
+	}
+	if !resp.OK {
+		return fmt.Errorf("health error: %s", resp.Error)
+	}
+
+	if *jsonOut {
+		fmt.Println(string(resp.Result))
+		return nil
+	}
+
+	var data map[string]any
+	_ = json.Unmarshal(resp.Result, &data)
+	fmt.Printf("ds5d status at %s:\n", *endpoint)
+	for k, v := range data {
+		fmt.Printf("  %-14s %v\n", k+":", v)
+	}
+	return nil
+}
+
 func cmdWatch(args []string) error {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
 	path := fs.String("hidraw", "", "device path")
 	_ = fs.Parse(args)
+
+	ctx := interruptContext()
+	if conn, ok := tryDaemonRPC(ctx); ok {
+		defer conn.Close()
+		fmt.Printf("connected to active ds5d daemon on %s (single HID owner mode)\n", ipc.DefaultSignalEndpoint)
+		last := time.Now()
+		for ctx.Err() == nil {
+			hdr, sigs, _, summary, err := ipc.ReadStateFrame(conn)
+			if err != nil {
+				return err
+			}
+			if time.Since(last) < 100*time.Millisecond {
+				continue
+			}
+			last = time.Now()
+			var l2, r2, lx, ly, rx, ry float64
+			for _, s := range sigs {
+				switch s.Name {
+				case "l2":
+					l2 = s.Raw
+				case "r2":
+					r2 = s.Raw
+				case "lx":
+					lx = s.Raw
+				case "ly":
+					ly = s.Raw
+				case "rx":
+					rx = s.Raw
+				case "ry":
+					ry = s.Raw
+				}
+			}
+			fmt.Printf("L2=%.2f R2=%.2f LX=%+.2f LY=%+.2f RX=%+.2f RY=%+.2f Rate=%dHz Seq=%d\n",
+				l2, r2, lx, ly, rx, ry, summary.RateHz, hdr.Seq)
+		}
+		return nil
+	}
 
 	dev, err := openDevice(*path)
 	if err != nil {
@@ -285,7 +456,6 @@ func cmdWatch(args []string) error {
 	}
 	defer dev.Close()
 
-	ctx := interruptContext()
 	buf := make([]byte, 128)
 	last := time.Now()
 	fmt.Printf("watching %s (ctrl-c to stop)\n", dev.Info().Path)

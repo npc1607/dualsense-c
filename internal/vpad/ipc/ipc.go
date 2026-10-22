@@ -101,17 +101,26 @@ type SpeechFrame struct {
 }
 
 // Server provides low-latency event-driven force feedback IPC.
+type clientHandle struct {
+	conn net.Conn
+	ch   chan []byte
+	mu   sync.Mutex
+}
+
 type Server struct {
 	listener net.Listener
 	logger   *log.Logger
 
 	mu      sync.RWMutex
-	clients map[net.Conn]chan []byte
+	clients map[net.Conn]*clientHandle
 	seq     uint32
 	closed  atomic.Bool
 
 	expireMu sync.Mutex
 	expire   *time.Timer
+
+	cmdMu      sync.RWMutex
+	cmdHandler CommandHandler
 }
 
 // Listen creates and starts an IPC server on endpoint.
@@ -128,7 +137,7 @@ func Listen(endpoint string, logger *log.Logger) (*Server, error) {
 	s := &Server{
 		listener: l,
 		logger:   logger,
-		clients:  make(map[net.Conn]chan []byte),
+		clients:  make(map[net.Conn]*clientHandle),
 	}
 	go s.acceptLoop()
 	return s, nil
@@ -162,34 +171,72 @@ func (s *Server) acceptLoop() {
 			_ = tc.SetKeepAlive(true)
 		}
 
-		ch := make(chan []byte, 64)
+		h := &clientHandle{
+			conn: conn,
+			ch:   make(chan []byte, 64),
+		}
 
 		s.mu.Lock()
-		s.clients[conn] = ch
+		s.clients[conn] = h
 		cnt := len(s.clients)
 		s.mu.Unlock()
 
 		s.logger.Printf("vpad/ipc: client connected from %s (%d active subscriber%s)",
 			conn.RemoteAddr(), cnt, plural(cnt))
 
-		go s.clientWriter(conn, ch)
+		go s.clientWriter(h)
+		go s.clientReader(h)
 	}
 }
 
-func (s *Server) clientWriter(c net.Conn, ch chan []byte) {
+func (s *Server) clientWriter(h *clientHandle) {
 	defer func() {
 		s.mu.Lock()
-		delete(s.clients, c)
+		delete(s.clients, h.conn)
 		cnt := len(s.clients)
 		s.mu.Unlock()
-		_ = c.Close()
+		_ = h.conn.Close()
 		s.logger.Printf("vpad/ipc: disconnected subscriber %s (%d active)",
-			c.RemoteAddr(), cnt)
+			h.conn.RemoteAddr(), cnt)
 	}()
 
-	for frame := range ch {
-		_ = c.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
-		if _, err := c.Write(frame); err != nil {
+	for frame := range h.ch {
+		_ = h.conn.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
+		h.mu.Lock()
+		_, err := h.conn.Write(frame)
+		h.mu.Unlock()
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (s *Server) clientReader(h *clientHandle) {
+	for !s.closed.Load() {
+		cmd, err := ReadCommand(h.conn)
+		if err != nil {
+			return
+		}
+		s.cmdMu.RLock()
+		handler := s.cmdHandler
+		s.cmdMu.RUnlock()
+
+		var resp Response
+		if handler != nil {
+			resp = handler(*cmd)
+		} else {
+			resp = Response{
+				ID:    cmd.ID,
+				OK:    false,
+				Error: "no command handler registered",
+			}
+		}
+
+		_ = h.conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+		h.mu.Lock()
+		err = WriteResponse(h.conn, resp)
+		h.mu.Unlock()
+		if err != nil {
 			return
 		}
 	}
@@ -204,9 +251,9 @@ func (s *Server) broadcastRaw(frame []byte) {
 	if s.closed.Load() {
 		return
 	}
-	for _, ch := range s.clients {
+	for _, h := range s.clients {
 		select {
-		case ch <- frame:
+		case h.ch <- frame:
 		default: // Drop immediately if subscriber queue is full; never block 125Hz hot path!
 		}
 	}
@@ -458,11 +505,11 @@ func (s *Server) Close() error {
 	s.expireMu.Unlock()
 
 	s.mu.Lock()
-	for conn, ch := range s.clients {
+	for conn, h := range s.clients {
 		_ = conn.Close()
-		close(ch)
+		close(h.ch)
 	}
-	s.clients = make(map[net.Conn]chan []byte)
+	s.clients = make(map[net.Conn]*clientHandle)
 	s.mu.Unlock()
 
 	if s.listener != nil {
@@ -509,4 +556,19 @@ func ReadFrame(r io.Reader, buf []byte) (left, right float32, seq uint32, err er
 		return 0, 0, 0, errors.New("vpad/ipc: invalid frame magic")
 	}
 	return l, rgt, sq, nil
+}
+
+// SetCommandHandler registers a handler for CMD1 JSON-RPC requests.
+func (s *Server) SetCommandHandler(h CommandHandler) {
+	s.cmdMu.Lock()
+	defer s.cmdMu.Unlock()
+	s.cmdHandler = h
+}
+
+// BroadcastState pushes a STATE1 telemetry state frame immediately to all active subscribers.
+func (s *Server) BroadcastState(frame []byte) {
+	if s.Subscribers() == 0 {
+		return
+	}
+	s.broadcastRaw(frame)
 }

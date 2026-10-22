@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	ossignal "os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -184,9 +186,224 @@ func run() error {
 		go traceSignals(ctx, set, p, logger)
 	}
 
+	startTime := time.Now()
+	var (
+		lastFrameMu    sync.RWMutex
+		lastFrame      hid.Frame
+		lastTick       time.Time
+		tickJitterUS   uint32
+		previewMu      sync.RWMutex
+		previewTarget  string
+		previewTrigger hid.Trigger
+		previewExpire  time.Time
+	)
+
+	stateTicker := time.NewTicker(time.Second / 30) // default 30Hz
+	defer stateTicker.Stop()
+
+	go func() {
+		stateSeq := uint32(0)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case tNow := <-stateTicker.C:
+				if sigServer == nil || sigServer.Subscribers() == 0 {
+					continue
+				}
+				stateSeq++
+				sigTelem := set.Telemetry(tNow, p.TTL())
+				ruleTelem := engine.Telemetry(tNow)
+
+				lastFrameMu.RLock()
+				curF := lastFrame
+				jitter := tickJitterUS
+				lastFrameMu.RUnlock()
+
+				muteByte := uint8(0)
+				if curF.MuteLED {
+					muteByte = 1
+				}
+				summary := ipc.StateSummary{
+					L2Mode:       uint8(curF.L2.Mode),
+					L2Params:     [4]uint8{curF.L2.P[0], curF.L2.P[1], curF.L2.P[2], curF.L2.P[3]},
+					R2Mode:       uint8(curF.R2.Mode),
+					R2Params:     [4]uint8{curF.R2.P[0], curF.R2.P[1], curF.R2.P[2], curF.R2.P[3]},
+					RumbleLeft:   curF.RumbleL,
+					RumbleRight:  curF.RumbleR,
+					LightbarR:    curF.Lightbar[0],
+					LightbarG:    curF.Lightbar[1],
+					LightbarB:    curF.Lightbar[2],
+					PlayerLEDs:   curF.PlayerLEDs,
+					MuteLED:      muteByte,
+					HapticLeft:   curF.HapticL,
+					HapticRight:  curF.HapticR,
+					RateHz:       uint16(*rate),
+					TickJitterUS: jitter,
+					Subscribers:  uint16(sigServer.Subscribers()),
+				}
+
+				hdr := ipc.StateHeader{
+					Flags:  0,
+					Seq:    stateSeq,
+					TickMS: uint32(tNow.Sub(startTime).Milliseconds()),
+				}
+				frame := ipc.EncodeStateFrame(hdr, sigTelem, ruleTelem, summary)
+				sigServer.BroadcastState(frame)
+			}
+		}
+	}()
+
+	if sigServer != nil {
+		sigServer.SetCommandHandler(func(cmd ipc.Command) ipc.Response {
+			switch cmd.Method {
+			case "health":
+				res, _ := json.Marshal(map[string]any{
+					"uptime_s":    time.Since(startTime).Seconds(),
+					"subscribers": sigServer.Subscribers(),
+					"rate_hz":     *rate,
+					"profile":     p.Name,
+					"source":      p.Source.Type,
+					"jitter_us":   tickJitterUS,
+				})
+				return ipc.Response{ID: cmd.ID, OK: true, Result: res}
+
+			case "state.subscribe":
+				var params struct {
+					Rate int `json:"rate"`
+				}
+				_ = json.Unmarshal(cmd.Params, &params)
+				if params.Rate == 30 || params.Rate == 60 {
+					stateTicker.Reset(time.Second / time.Duration(params.Rate))
+				}
+				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"subscribed":true}`)}
+
+			case "profile.reload":
+				newP, err := profile.Resolve(*profileName, *profilesDir)
+				if err != nil {
+					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
+				}
+				if err := newP.Validate(); err != nil {
+					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
+				}
+				newShapers := make(map[string]sig.Shaper, len(newP.Shape))
+				for name, s := range newP.Shape {
+					newShapers[name] = sig.Shaper{
+						Deadzone: s.Deadzone,
+						Gamma:    s.Gamma,
+						SlewUp:   s.SlewUp,
+						SlewDown: s.SlewDown,
+					}
+				}
+				set.SetShapers(newShapers)
+				if err := engine.Reload(newP); err != nil {
+					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
+				}
+				p = newP
+				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"reloaded":true}`)}
+
+			case "profile.apply":
+				var params struct {
+					Shape map[string]sig.Shaper `json:"shape"`
+				}
+				if err := json.Unmarshal(cmd.Params, &params); err == nil && len(params.Shape) > 0 {
+					set.SetShapers(params.Shape)
+				}
+				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"applied":true}`)}
+
+			case "effect.preview":
+				var params struct {
+					Target string            `json:"target"`
+					Mode   string            `json:"mode"`
+					Params map[string]string `json:"params"`
+					TTLMS  int               `json:"ttl_ms"`
+				}
+				if err := json.Unmarshal(cmd.Params, &params); err != nil {
+					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
+				}
+				ttl := time.Duration(params.TTLMS) * time.Millisecond
+				if ttl <= 0 {
+					ttl = 1000 * time.Millisecond
+				}
+				m, ok := hid.ParseMode(params.Mode)
+				if !ok {
+					return ipc.Response{ID: cmd.ID, OK: false, Error: fmt.Sprintf("unknown mode %q", params.Mode)}
+				}
+				var tr hid.Trigger
+				tr.Mode = m
+				for k, v := range params.Params {
+					if idx, ok := hid.ParamIndex(m, k); ok {
+						var num int
+						fmt.Sscanf(v, "%d", &num)
+						if idx < len(tr.P) {
+							tr.P[idx] = uint8(num)
+						}
+					}
+				}
+				previewMu.Lock()
+				previewTarget = params.Target
+				previewTrigger = tr
+				previewExpire = time.Now().Add(ttl)
+				previewMu.Unlock()
+				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"preview":true}`)}
+
+			case "rules.simulate":
+				var params struct {
+					Signals map[string]float64 `json:"signals"`
+				}
+				if err := json.Unmarshal(cmd.Params, &params); err != nil {
+					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
+				}
+				frame, ruleTelem := engine.Simulate(time.Now(), params.Signals)
+				res, _ := json.Marshal(map[string]any{
+					"frame": frame,
+					"rules": ruleTelem,
+				})
+				return ipc.Response{ID: cmd.ID, OK: true, Result: res}
+
+			case "hid.claim", "hid.release":
+				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"claimed":true}`)}
+
+			case "rate.set":
+				var params struct {
+					Hz int `json:"hz"`
+				}
+				if err := json.Unmarshal(cmd.Params, &params); err == nil && params.Hz > 0 {
+					*rate = params.Hz
+				}
+				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"rate_set":true}`)}
+
+			default:
+				return ipc.Response{ID: cmd.ID, OK: false, Error: fmt.Sprintf("unknown method %q", cmd.Method)}
+			}
+		})
+	}
+
 	statusBar := p.StatusLight() && !p.HasTarget("lightbar")
+	expectedInterval := time.Second / time.Duration(*rate)
 	produce := func(now time.Time) hid.Frame {
+		if !lastTick.IsZero() {
+			jitter := now.Sub(lastTick) - expectedInterval
+			if jitter < 0 {
+				jitter = -jitter
+			}
+			tickJitterUS = uint32(jitter.Microseconds())
+		}
+		lastTick = now
+
 		f := engine.Step(now)
+
+		previewMu.RLock()
+		if now.Before(previewExpire) {
+			if previewTarget == "l2" || previewTarget == "both" {
+				f.L2 = previewTrigger
+			}
+			if previewTarget == "r2" || previewTarget == "both" {
+				f.R2 = previewTrigger
+			}
+		}
+		previewMu.RUnlock()
+
 		if statusBar {
 			if set.Fresh(now, p.TTL()) {
 				f.Lightbar = [3]uint8{0, 255, 0} // live
@@ -194,6 +411,10 @@ func run() error {
 				f.Lightbar = [3]uint8{255, 200, 0} // idle
 			}
 		}
+
+		lastFrameMu.Lock()
+		lastFrame = f
+		lastFrameMu.Unlock()
 		return f
 	}
 

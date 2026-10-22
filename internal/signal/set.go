@@ -124,3 +124,51 @@ func (s *Set) Fresh(now time.Time, ttl time.Duration) bool {
 	}
 	return false
 }
+
+// SignalTelemetry carries one signal's raw and shaped state plus staleness metadata.
+type SignalTelemetry struct {
+	ID     uint8
+	Name   string
+	Raw    float64
+	Shaped float64
+	AgeMS  uint16
+	Fresh  bool
+}
+
+// Telemetry returns a non-destructive snapshot of all standard signals with age and freshness.
+func (s *Set) Telemetry(now time.Time, ttl time.Duration) []SignalTelemetry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]SignalTelemetry, len(Standard))
+	for i, name := range Standard {
+		st := SignalTelemetry{
+			ID:    uint8(i),
+			Name:  name,
+			AgeMS: 0xFFFF,
+			Fresh: false,
+		}
+		if e := s.vals[name]; e != nil {
+			st.Raw = e.raw
+			st.Shaped = e.shaped
+			age := now.Sub(e.at)
+			if age < 0 {
+				st.AgeMS = 0
+			} else if ms := age.Milliseconds(); ms > 0xFFFF {
+				st.AgeMS = 0xFFFF
+			} else {
+				st.AgeMS = uint16(ms)
+			}
+			st.Fresh = (ttl <= 0 || age <= ttl)
+		}
+		out[i] = st
+	}
+	return out
+}
+
+// SetShapers replaces the shapers map atomically without discarding existing signal history.
+func (s *Set) SetShapers(shapers map[string]Shaper) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shapers = shapers
+}

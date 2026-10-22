@@ -22,6 +22,26 @@ import (
 type target string
 
 const (
+	RuleStateFalse    uint8 = 0
+	RuleStateTrue     uint8 = 1
+	RuleStateHold     uint8 = 2
+	RuleStateStale    uint8 = 3
+	RuleStateCooldown uint8 = 4
+	RuleStateError    uint8 = 5
+)
+
+// RuleTelemetry exposes rule execution decisions and timing for UI inspection.
+type RuleTelemetry struct {
+	RuleID     uint16 `json:"rule_id"`
+	Name       string `json:"name"`
+	Target     string `json:"target"`
+	Priority   int16  `json:"priority"`
+	State      uint8  `json:"state"`
+	LastFireMS uint32 `json:"last_fire_ms"`
+	UntilMS    uint32 `json:"until_ms"`
+}
+
+const (
 	targetL2          target = "l2"
 	targetR2          target = "r2"
 	targetRumbleLeft  target = "rumble_left"
@@ -62,6 +82,7 @@ type rule struct {
 	lastFired time.Time
 	text      string
 	wasActive bool
+	lastState uint8
 }
 
 // Engine turns the current signal values into one controller frame.
@@ -90,6 +111,7 @@ type Engine struct {
 	speechEvents  []SpeechEvent
 	speechMu      sync.Mutex
 	speechHandler func(SpeechEvent)
+	mu            sync.RWMutex
 }
 
 // New compiles every rule in the profile. Compilation is strict: unknown
@@ -324,6 +346,8 @@ func (e *Engine) compile(src string) (*vm.Program, error) {
 // Step evaluates all rules for the current time and returns one controller
 // frame. It is safe to call at a fixed tick rate; nothing in here blocks.
 func (e *Engine) Step(now time.Time) hid.Frame {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.now = now
 
 	vals, fresh := e.set.Snapshot(now, e.p.TTL())
@@ -373,6 +397,7 @@ func (e *Engine) Step(now time.Time) hid.Frame {
 		if !isActive {
 			continue
 		}
+		r.lastFired = now
 		e.apply(r, &f, written)
 	}
 	if len(speechCandidates) > 0 {
@@ -405,22 +430,31 @@ func (e *Engine) Step(now time.Time) hid.Frame {
 
 func (e *Engine) active(r *rule) bool {
 	if r.when == nil {
+		r.lastState = RuleStateTrue
 		return true
 	}
 	out, err := e.vmr.Run(r.when, e.env)
 	if err != nil {
 		e.reportErr(r, err)
+		r.lastState = RuleStateError
 		return false
 	}
 	if truthy(out) {
+		if r.cooldown > 0 && !r.lastFired.IsZero() && e.now.Sub(r.lastFired) < r.cooldown {
+			r.lastState = RuleStateCooldown
+			return false
+		}
 		if r.hold > 0 {
 			r.until = e.now.Add(r.hold)
 		}
+		r.lastState = RuleStateTrue
 		return true
 	}
 	if r.hold > 0 && e.now.Before(r.until) {
+		r.lastState = RuleStateHold
 		return true
 	}
+	r.lastState = RuleStateFalse
 	return false
 }
 
@@ -690,4 +724,118 @@ func (e *Engine) SetSpeechHandler(fn func(SpeechEvent)) {
 	e.speechMu.Lock()
 	defer e.speechMu.Unlock()
 	e.speechHandler = fn
+}
+
+// Telemetry returns execution metadata and states of all compiled rules.
+func (e *Engine) Telemetry(now time.Time) []RuleTelemetry {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	out := make([]RuleTelemetry, len(e.rules))
+	for i, r := range e.rules {
+		var untilMS uint32
+		if !r.until.IsZero() && now.Before(r.until) {
+			untilMS = uint32(r.until.Sub(now).Milliseconds())
+		}
+		var lastFireMS uint32
+		if !r.lastFired.IsZero() {
+			d := now.Sub(r.lastFired)
+			if d > 0 {
+				lastFireMS = uint32(d.Milliseconds())
+			}
+		}
+		out[i] = RuleTelemetry{
+			RuleID:     uint16(i),
+			Name:       r.name,
+			Target:     string(r.target),
+			Priority:   int16(r.priority),
+			State:      r.lastState,
+			LastFireMS: lastFireMS,
+			UntilMS:    untilMS,
+		}
+	}
+	return out
+}
+
+// Reload re-compiles rules from a new profile and safely transfers timing state
+// without losing active timers for matching rules.
+func (e *Engine) Reload(p *profile.Profile) error {
+	if err := p.Validate(); err != nil {
+		return fmt.Errorf("reload: validate profile: %w", err)
+	}
+
+	tempEng := &Engine{
+		p:     p,
+		set:   e.set,
+		log:   e.log,
+		names: append(append([]string{}, signal.Standard...), p.Extra...),
+		prev:  map[string]float64{},
+		cur:   map[string]float64{},
+		fresh: map[string]bool{},
+		start: e.start,
+	}
+	tempEng.env = make(map[string]any, len(tempEng.names)+10)
+	for _, n := range tempEng.names {
+		tempEng.env[n] = float64(0)
+	}
+	tempEng.installHelpers()
+
+	var newRules []*rule
+	for i, pr := range p.Rules {
+		r, err := tempEng.compileRule(pr, i)
+		if err != nil {
+			return fmt.Errorf("reload: compile rule: %w", err)
+		}
+		newRules = append(newRules, r)
+	}
+	slices.SortStableFunc(newRules, func(a, b *rule) int { return cmp.Compare(a.priority, b.priority) })
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	oldByName := make(map[string]*rule, len(e.rules))
+	for _, r := range e.rules {
+		oldByName[r.name] = r
+	}
+	for _, nr := range newRules {
+		if old, ok := oldByName[nr.name]; ok {
+			nr.until = old.until
+			nr.lastFired = old.lastFired
+			nr.wasActive = old.wasActive
+			nr.lastState = old.lastState
+		}
+	}
+
+	e.p = p
+	e.rules = newRules
+	e.names = tempEng.names
+	e.env = tempEng.env
+	e.installHelpers()
+	return nil
+}
+
+// Simulate runs an isolated evaluation of the current rules against given signals
+// without affecting the active daemon state or physical hardware.
+func (e *Engine) Simulate(now time.Time, signals map[string]float64) (hid.Frame, []RuleTelemetry) {
+	e.mu.RLock()
+	prof := e.p
+	e.mu.RUnlock()
+
+	simSet := signal.NewSet(nil)
+	vals32 := make(map[string]float32, len(signals))
+	for k, v := range signals {
+		vals32[k] = float32(v)
+	}
+	simSet.Apply(signal.Frame{
+		Values: vals32,
+		At:     now,
+	})
+
+	simEng, err := New(prof, simSet, nil)
+	if err != nil {
+		return hid.Frame{}, nil
+	}
+	frame := simEng.Step(now)
+	telemetry := simEng.Telemetry(now)
+	return frame, telemetry
 }

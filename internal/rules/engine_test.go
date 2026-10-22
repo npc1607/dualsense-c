@@ -538,3 +538,110 @@ func TestRules_TargetSpeakAndRadio(t *testing.T) {
 		t.Fatalf("expected rising edge rule not to re-trigger, handled count = %d", len(handled))
 	}
 }
+
+func TestEngine_TelemetryReloadAndSimulate(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "test",
+		Source: profile.Source{Type: "sim"},
+		Rules: []profile.Rule{
+			{
+				Name:   "r1",
+				When:   "throttle > 0.5",
+				Target: "r2",
+				Effect: "rigid",
+				Params: map[string]string{"start": "0", "force": "200"},
+				Hold:   profile.Duration(100 * time.Millisecond),
+			},
+			{
+				Name:   "r2_unconditional",
+				Target: "rumble_left",
+				Value:  "128",
+			},
+		},
+	}
+	s := signal.NewSet(nil)
+	eng, err := New(p, s, nil)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	t0 := time.Now()
+	// Step 1: throttle = 0 (r1 should be false, r2 should be true)
+	_ = eng.Step(t0)
+	telem := eng.Telemetry(t0)
+	if len(telem) != 2 {
+		t.Fatalf("expected 2 telemetry rules, got %d", len(telem))
+	}
+	if telem[0].State != RuleStateFalse {
+		t.Fatalf("expected r1 to be FALSE, got %d", telem[0].State)
+	}
+	if telem[1].State != RuleStateTrue {
+		t.Fatalf("expected r2_unconditional to be TRUE, got %d", telem[1].State)
+	}
+
+	// Step 2: throttle = 0.8 (r1 should be true)
+	s.Apply(signal.Frame{
+		Values: map[string]float32{"throttle": 0.8},
+		At:     t0.Add(10 * time.Millisecond),
+	})
+	_ = eng.Step(t0.Add(10 * time.Millisecond))
+	telem = eng.Telemetry(t0.Add(10 * time.Millisecond))
+	if telem[0].State != RuleStateTrue {
+		t.Fatalf("expected r1 to be TRUE, got %d", telem[0].State)
+	}
+
+	// Step 3: throttle = 0.0, but within hold (100ms) -> r1 should be HOLD
+	s.Apply(signal.Frame{
+		Values: map[string]float32{"throttle": 0.0},
+		At:     t0.Add(20 * time.Millisecond),
+	})
+	_ = eng.Step(t0.Add(20 * time.Millisecond))
+	telem = eng.Telemetry(t0.Add(20 * time.Millisecond))
+	if telem[0].State != RuleStateHold {
+		t.Fatalf("expected r1 to be HOLD, got %d", telem[0].State)
+	}
+	if telem[0].UntilMS == 0 {
+		t.Fatalf("expected r1 UntilMS > 0 during hold")
+	}
+
+	// Test Reload: new profile modifies rule parameters but keeps rule "r1"
+	pNew := &profile.Profile{
+		Name:   "test",
+		Source: profile.Source{Type: "sim"},
+		Rules: []profile.Rule{
+			{
+				Name:   "r1",
+				When:   "throttle > 0.4",
+				Target: "r2",
+				Effect: "rigid",
+				Params: map[string]string{"start": "0", "force": "250"},
+				Hold:   profile.Duration(100 * time.Millisecond),
+			},
+		},
+	}
+	if err := eng.Reload(pNew); err != nil {
+		t.Fatalf("Reload failed: %v", err)
+	}
+	// After reload, r1 should still retain hold status
+	telemReload := eng.Telemetry(t0.Add(20 * time.Millisecond))
+	if len(telemReload) != 1 {
+		t.Fatalf("expected 1 rule after reload, got %d", len(telemReload))
+	}
+	if telemReload[0].State != RuleStateHold {
+		t.Fatalf("expected r1 to retain HOLD state after reload, got %d", telemReload[0].State)
+	}
+
+	// Test Simulate: isolated test with throttle = 0.9
+	simFrame, simTelem := eng.Simulate(t0.Add(500*time.Millisecond), map[string]float64{
+		"throttle": 0.9,
+	})
+	if len(simTelem) != 1 {
+		t.Fatalf("expected 1 rule in simulation, got %d", len(simTelem))
+	}
+	if simTelem[0].State != RuleStateTrue {
+		t.Fatalf("expected simulated rule to be TRUE, got %d", simTelem[0].State)
+	}
+	if simFrame.R2.Mode != hid.ModeRigid {
+		t.Fatalf("expected simulated R2 mode Rigid, got %v", simFrame.R2.Mode)
+	}
+}

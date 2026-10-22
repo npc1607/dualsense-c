@@ -77,8 +77,10 @@ jobs:
 
           suffix=""
           [ "$GOOS" = windows ] && suffix=".exe"
-          go build -trimpath -ldflags "$ldflags" -o "$out/ds5d$suffix"   ./cmd/ds5d
-          go build -trimpath -ldflags "$ldflags" -o "$out/ds5ctl$suffix" ./cmd/ds5ctl
+          go build -trimpath -ldflags "$ldflags" -o "$out/ds5d$suffix"     ./cmd/ds5d
+          go build -trimpath -ldflags "$ldflags" -o "$out/ds5ctl$suffix"   ./cmd/ds5ctl
+          go build -trimpath -ldflags "$ldflags" -o "$out/ds5vpad$suffix" ./cmd/ds5vpad
+          go build -trimpath -ldflags "$ldflags" -o "$out/ds5radio$suffix" ./cmd/ds5radio
 
           # The shared-memory bridge always targets Windows: it runs inside a
           # Proton/Wine prefix next to the game, even on a Linux host.
@@ -87,8 +89,10 @@ jobs:
 
           cp README.md LICENSE "$out/"
           cp -r profiles "$out/"
+          [ -d assets ] && cp -r assets "$out/"
+          cp -r scripts "$out/"
           if [ "$GOOS" = linux ]; then
-            cp -r udev scripts "$out/"
+            cp -r udev "$out/"
           fi
 
       - name: package

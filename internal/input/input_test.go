@@ -16,7 +16,7 @@ func usbReport(p []byte) []byte {
 
 func TestParseUSB(t *testing.T) {
 	// payload: LX LY RX RY L2 R2 seq b0 b1 b2
-	p := []byte{0x80, 0x80, 0x88, 0x77, 255, 128, 7, 0x22, 0x00, 0x08}
+	p := []byte{0x80, 0x80, 0x88, 0x77, 255, 128, 7, 0x22, 0x0f, 0x08}
 	s, ok := Parse(usbReport(p))
 	if !ok {
 		t.Fatal("Parse rejected a valid USB report")
@@ -29,6 +29,9 @@ func TestParseUSB(t *testing.T) {
 	}
 	if !s.Cross || !s.R1 {
 		t.Errorf("buttons0 = %#x: cross=%v r1=%v", p[7], s.Cross, s.R1)
+	}
+	if !s.Create || !s.Options || !s.L3 || !s.R3 {
+		t.Errorf("buttons1 = %#x: create=%v options=%v l3=%v r3=%v", p[8], s.Create, s.Options, s.L3, s.R3)
 	}
 	// 0x80 is the stick centre, so both axes must be ~0.
 	if math.Abs(float64(s.LX)) > 0.01 || math.Abs(float64(s.LY)) > 0.01 {

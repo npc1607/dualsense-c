@@ -51,6 +51,9 @@ var Standard = []string{
 
 	// Cross-genre companion signals (Roguelike, Souls-like, Tactical FPS)
 	"hp", "stamina", "mana", "hazard",
+
+	// Extended DualSense buttons (appended)
+	"create", "options", "l3", "r3",
 }
 
 var standardIDs = func() map[string]uint8 {

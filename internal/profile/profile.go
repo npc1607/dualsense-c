@@ -48,17 +48,17 @@ const (
 
 // Profile is one game (or one game-agnostic behaviour) definition.
 type Profile struct {
-	Name        string      `yaml:"name"`
-	Title       string      `yaml:"title"`
-	Description string      `yaml:"description"`
-	Source      Source      `yaml:"source"`
-	Shape       Shapers     `yaml:"shape"`
-	Safety      Safety      `yaml:"safety"`
-	Extra       []string    `yaml:"signals"` // extra signal names this profile may use
-	Rules       []Rule      `yaml:"rules"`
-	Haptics     *Haptics    `yaml:"haptics"` // optional voice-coil output
-	Aim         *AimConfig  `yaml:"aim"`
-	AimAssist   *AimConfig  `yaml:"aim_assist"` // Backward compatible alias for fps-aim.yaml
+	Name        string     `yaml:"name"`
+	Title       string     `yaml:"title"`
+	Description string     `yaml:"description"`
+	Source      Source     `yaml:"source"`
+	Shape       Shapers    `yaml:"shape"`
+	Safety      Safety     `yaml:"safety"`
+	Extra       []string   `yaml:"signals"` // extra signal names this profile may use
+	Rules       []Rule     `yaml:"rules"`
+	Haptics     *Haptics   `yaml:"haptics"` // optional voice-coil output
+	Aim         *AimConfig `yaml:"aim"`
+	AimAssist   *AimConfig `yaml:"aim_assist"` // Backward compatible alias for fps-aim.yaml
 }
 
 // AimConfig defines stick shaping, gyro aiming, and anti-recoil enhancements.

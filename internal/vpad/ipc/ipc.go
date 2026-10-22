@@ -102,9 +102,12 @@ type SpeechFrame struct {
 
 // Server provides low-latency event-driven force feedback IPC.
 type clientHandle struct {
-	conn net.Conn
-	ch   chan []byte
-	mu   sync.Mutex
+	conn       net.Conn
+	ch         chan []byte
+	mu         sync.Mutex
+	isRPC      atomic.Bool
+	subSignals atomic.Bool
+	subState   atomic.Bool
 }
 
 type Server struct {
@@ -176,6 +179,14 @@ func (s *Server) acceptLoop() {
 			ch:   make(chan []byte, 64),
 		}
 
+		// Backward-compatibility: if the connected peer does not issue any CMD1 commands
+		// within 20ms (e.g. legacy ds5radio or rumble listeners), automatically treat it as a signals subscriber.
+		time.AfterFunc(20*time.Millisecond, func() {
+			if !h.isRPC.Load() && !h.subState.Load() {
+				h.subSignals.Store(true)
+			}
+		})
+
 		s.mu.Lock()
 		s.clients[conn] = h
 		cnt := len(s.clients)
@@ -211,12 +222,39 @@ func (s *Server) clientWriter(h *clientHandle) {
 	}
 }
 
+func drainChan(ch chan []byte) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
 func (s *Server) clientReader(h *clientHandle) {
 	for !s.closed.Load() {
 		cmd, err := ReadCommand(h.conn)
 		if err != nil {
 			return
 		}
+
+		h.isRPC.Store(true)
+		switch cmd.Method {
+		case "state.subscribe":
+			h.subState.Store(true)
+			h.subSignals.Store(false)
+			drainChan(h.ch)
+		case "signals.subscribe":
+			h.subSignals.Store(true)
+			h.subState.Store(false)
+			drainChan(h.ch)
+		default:
+			if !h.subState.Load() && !h.subSignals.Load() {
+				drainChan(h.ch)
+			}
+		}
+
 		s.cmdMu.RLock()
 		handler := s.cmdHandler
 		s.cmdMu.RUnlock()
@@ -243,6 +281,12 @@ func (s *Server) clientReader(h *clientHandle) {
 }
 
 func (s *Server) broadcastRaw(frame []byte) {
+	s.broadcastRawFiltered(frame, func(h *clientHandle) bool {
+		return h.subSignals.Load()
+	})
+}
+
+func (s *Server) broadcastRawFiltered(frame []byte, match func(h *clientHandle) bool) {
 	if s.closed.Load() {
 		return
 	}
@@ -252,6 +296,9 @@ func (s *Server) broadcastRaw(frame []byte) {
 		return
 	}
 	for _, h := range s.clients {
+		if !match(h) {
+			continue
+		}
 		select {
 		case h.ch <- frame:
 		default: // Drop immediately if subscriber queue is full; never block 125Hz hot path!
@@ -565,10 +612,12 @@ func (s *Server) SetCommandHandler(h CommandHandler) {
 	s.cmdHandler = h
 }
 
-// BroadcastState pushes a STATE1 telemetry state frame immediately to all active subscribers.
+// BroadcastState pushes a STATE1 telemetry state frame immediately to all active state subscribers.
 func (s *Server) BroadcastState(frame []byte) {
 	if s.Subscribers() == 0 {
 		return
 	}
-	s.broadcastRaw(frame)
+	s.broadcastRawFiltered(frame, func(h *clientHandle) bool {
+		return h.subState.Load()
+	})
 }

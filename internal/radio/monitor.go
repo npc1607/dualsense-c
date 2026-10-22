@@ -249,6 +249,13 @@ func (m *Monitor) RunIPC(ctx context.Context, endpoint string) error {
 		backoff = 500 * time.Millisecond
 		m.logger.Printf("radio/monitor: connected to ds5d IPC broadcaster (%s)", endpoint)
 
+		// Explicitly subscribe to SIG1 signals
+		_ = ipc.WriteCommand(conn, ipc.Command{
+			ID:     "radio-sub",
+			Method: "signals.subscribe",
+		})
+		_, _ = ipc.ReadResponse(conn)
+
 		done := make(chan struct{})
 		var closeOnce sync.Once
 		cleanup := func() {

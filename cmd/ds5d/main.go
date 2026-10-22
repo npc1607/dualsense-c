@@ -11,6 +11,7 @@ import (
 	"log"
 	ossignal "os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -278,6 +279,9 @@ func run() error {
 				}
 				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"subscribed":true}`)}
 
+			case "signals.subscribe":
+				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"subscribed":true}`)}
+
 			case "profile.reload":
 				newP, err := profile.Resolve(*profileName, *profilesDir)
 				if err != nil {
@@ -333,10 +337,10 @@ func run() error {
 				tr.Mode = m
 				for k, v := range params.Params {
 					if idx, ok := hid.ParamIndex(m, k); ok {
-						var num int
-						fmt.Sscanf(v, "%d", &num)
-						if idx < len(tr.P) {
-							tr.P[idx] = uint8(num)
+						if num, err := strconv.Atoi(v); err == nil {
+							if idx < len(tr.P) {
+								tr.P[idx] = uint8(num)
+							}
 						}
 					}
 				}

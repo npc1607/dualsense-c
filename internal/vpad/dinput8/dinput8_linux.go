@@ -303,7 +303,7 @@ func (p *pad) translate(buf []byte) []byte {
 
 		switch typ {
 		case vpad.EvSyn:
-			if p.aimProc != nil && (p.hasRX || p.hasRY) {
+			if p.aimProc != nil && (p.hasRX || p.hasRY || p.curR2 > 0) {
 				normRX := float32(p.curRX-128) / 127.5
 				normRY := float32(p.curRY-128) / 127.5
 				normL2 := float32(p.curL2) / 255.0

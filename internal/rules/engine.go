@@ -821,7 +821,20 @@ func (e *Engine) Simulate(now time.Time, signals map[string]float64) (hid.Frame,
 	prof := e.p
 	e.mu.RUnlock()
 
-	simSet := signal.NewSet(nil)
+	var shapers map[string]signal.Shaper
+	if prof != nil && len(prof.Shape) > 0 {
+		shapers = make(map[string]signal.Shaper, len(prof.Shape))
+		for name, s := range prof.Shape {
+			shapers[name] = signal.Shaper{
+				Deadzone: s.Deadzone,
+				Gamma:    s.Gamma,
+				SlewUp:   s.SlewUp,
+				SlewDown: s.SlewDown,
+			}
+		}
+	}
+
+	simSet := signal.NewSet(shapers)
 	vals32 := make(map[string]float32, len(signals))
 	for k, v := range signals {
 		vals32[k] = float32(v)

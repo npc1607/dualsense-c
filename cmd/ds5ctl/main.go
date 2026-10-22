@@ -417,6 +417,14 @@ func cmdWatch(args []string) error {
 	if conn, ok := tryDaemonRPC(ctx); ok {
 		defer conn.Close()
 		fmt.Printf("connected to active ds5d daemon on %s (single HID owner mode)\n", ipc.DefaultSignalEndpoint)
+		// Explicitly subscribe to STATE1 frames
+		if err := ipc.WriteCommand(conn, ipc.Command{ID: "watch", Method: "state.subscribe"}); err != nil {
+			return err
+		}
+		resp, err := ipc.ReadResponse(conn)
+		if err != nil || !resp.OK {
+			return fmt.Errorf("ds5d state subscribe failed: %v", err)
+		}
 		last := time.Now()
 		for ctx.Err() == nil {
 			hdr, sigs, _, summary, err := ipc.ReadStateFrame(conn)

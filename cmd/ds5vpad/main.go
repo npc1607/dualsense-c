@@ -29,10 +29,10 @@ var version = "dev"
 
 func main() {
 	var (
-		proto   = flag.String("proto", string(vpad.ProtocolXInput), "virtual pad protocol: xinput (default, Xbox 360) or dinput8 (Logitech Dual Action DirectInput 8)")
-		name    = flag.String("name", "", "virtual device name (default: auto per protocol)")
-		grab    = flag.String("grab", "", "physical evdev node to grab (default: auto-detect DualSense)")
-		listen  = flag.String("listen", ipc.DefaultEndpoint, "ultra-low latency IPC endpoint for force feedback (e.g. 127.0.0.1:9998 or unix:///tmp/ds5vpad.sock)")
+		proto    = flag.String("proto", string(vpad.ProtocolXInput), "virtual pad protocol: xinput (default, Xbox 360) or dinput8 (Logitech Dual Action DirectInput 8)")
+		name     = flag.String("name", "", "virtual device name (default: auto per protocol)")
+		grab     = flag.String("grab", "", "physical evdev node to grab (default: auto-detect DualSense)")
+		listen   = flag.String("listen", ipc.DefaultEndpoint, "ultra-low latency IPC endpoint for force feedback (e.g. 127.0.0.1:9998 or unix:///tmp/ds5vpad.sock)")
 		publish  = flag.String("publish", "", "alias for -listen (deprecated)")
 		profPath = flag.String("profile", "", "path to profile .yaml (for aim assist & curves)")
 		quiet    = flag.Bool("quiet", false, "only log errors")

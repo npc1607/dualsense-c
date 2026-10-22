@@ -436,3 +436,105 @@ func TestCurveAndSCurveHelpers(t *testing.T) {
 		t.Errorf("scurve(0.5) = %d, want 128", f.RumbleR)
 	}
 }
+
+func TestRules_TargetSpeakAndRadio(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "companion-test",
+		Source: profile.Source{Type: "sim"},
+		Rules: []profile.Rule{
+			{
+				Name:     "low_hp",
+				When:     "hp > 0 && hp <= 20",
+				Target:   "speak",
+				Clip:     "low_hp_warning",
+				Priority: 90,
+				Cooldown: profile.Duration(5 * time.Second),
+				Text:     "Health critical!",
+			},
+			{
+				Name:     "hazard_alert",
+				When:     "hazard > 0.8",
+				Target:   "radio",
+				Clip:     "boss_incoming",
+				Priority: 80,
+				Cooldown: profile.Duration(10 * time.Second),
+				Text:     "Strong enemy detected!",
+			},
+			{
+				Name:     "stamina_pulse",
+				When:     "stamina < 0.2",
+				Target:   "speak",
+				Clip:     "out_of_breath",
+				Priority: 30,
+				Hold:     profile.Duration(2 * time.Second),
+				// cooldown 0 -> fires on rising edge
+			},
+		},
+	}
+
+	set := signal.NewSet(nil)
+	e := mustEngine(t, p, set)
+	t0 := time.Now()
+
+	// 1. Initial tick with normal signals: no speech events
+	apply(set, t0, map[string]float32{"hp": 100, "hazard": 0.1, "stamina": 1.0})
+	e.Step(t0)
+	events := e.TakeSpeechEvents()
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events on idle state, got %d", len(events))
+	}
+
+	// 2. Both low_hp (pri 90) and hazard_alert (pri 80) trigger together:
+	// They should both fire and be returned sorted by Priority descending!
+	t1 := t0.Add(100 * time.Millisecond)
+	apply(set, t1, map[string]float32{"hp": 15, "hazard": 0.9, "stamina": 1.0})
+	e.Step(t1)
+	events = e.TakeSpeechEvents()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 speech events, got %d", len(events))
+	}
+	if events[0].Clip != "low_hp_warning" || events[0].Priority != 90 {
+		t.Errorf("expected low_hp_warning (pri 90) first, got %+v", events[0])
+	}
+	if events[1].Clip != "boss_incoming" || events[1].Priority != 80 {
+		t.Errorf("expected boss_incoming (pri 80) second, got %+v", events[1])
+	}
+
+	// 3. Immediately next step (t1 + 50ms): within cooldown -> no new events
+	t2 := t1.Add(50 * time.Millisecond)
+	e.Step(t2)
+	events = e.TakeSpeechEvents()
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events within cooldown, got %d", len(events))
+	}
+
+	// 4. At t1 + 5.1s: low_hp cooldown (5s) has expired! Should fire again
+	t3 := t1.Add(5100 * time.Millisecond)
+	apply(set, t3, map[string]float32{"hp": 15, "hazard": 0.0, "stamina": 1.0})
+	e.Step(t3)
+	events = e.TakeSpeechEvents()
+	if len(events) != 1 || events[0].Clip != "low_hp_warning" {
+		t.Fatalf("expected 1 low_hp_warning event after 5s cooldown, got %+v", events)
+	}
+
+	// 5. Test rising edge with cooldown 0: stamina_pulse
+	// First frame triggers stamina_pulse
+	var handled []SpeechEvent
+	e.SetSpeechHandler(func(ev SpeechEvent) {
+		handled = append(handled, ev)
+	})
+
+	t4 := t3.Add(100 * time.Millisecond)
+	apply(set, t4, map[string]float32{"hp": 100, "hazard": 0.0, "stamina": 0.1})
+	e.Step(t4)
+	if len(handled) != 1 || handled[0].Clip != "out_of_breath" {
+		t.Fatalf("expected stamina_pulse to fire via handler on rising edge, got %+v", handled)
+	}
+
+	// Continuous low stamina in subsequent step: rising edge rule must not re-trigger
+	t5 := t4.Add(50 * time.Millisecond)
+	e.Step(t5)
+	if len(handled) != 1 {
+		t.Fatalf("expected rising edge rule not to re-trigger, handled count = %d", len(handled))
+	}
+}

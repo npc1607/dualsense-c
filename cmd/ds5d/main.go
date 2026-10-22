@@ -17,11 +17,13 @@ import (
 	"github.com/npc1607/dualsense-c/internal/device"
 	"github.com/npc1607/dualsense-c/internal/hid"
 	"github.com/npc1607/dualsense-c/internal/profile"
+	"github.com/npc1607/dualsense-c/internal/radio"
 	"github.com/npc1607/dualsense-c/internal/rules"
 	sig "github.com/npc1607/dualsense-c/internal/signal"
 	"github.com/npc1607/dualsense-c/internal/sink"
 	"github.com/npc1607/dualsense-c/internal/sink/haptics"
 	"github.com/npc1607/dualsense-c/internal/source"
+	"github.com/npc1607/dualsense-c/internal/vpad/ipc"
 
 	// register built-in sources
 	_ "github.com/npc1607/dualsense-c/internal/source/all"
@@ -38,15 +40,16 @@ func main() {
 
 func run() error {
 	var (
-		profileName = flag.String("profile", "fps", "profile name (builtin) or path to a .yaml file")
-		profilesDir = flag.String("profiles", "", "extra directory to look up profiles in")
-		hidrawPath  = flag.String("hidraw", "", "force a device path (default: auto-detect)")
-		rate        = flag.Int("rate", 125, "output reports per second")
-		sourceType  = flag.String("source", "", "override the profile's source type (e.g. sim)")
-		dryRun      = flag.Bool("dry-run", false, "do not open a controller; print frames instead")
-		trace       = flag.Bool("trace", false, "log signal values twice per second")
-		list        = flag.Bool("list", false, "list profiles and exit")
-		showVer     = flag.Bool("version", false, "print version and exit")
+		profileName  = flag.String("profile", "fps", "profile name (builtin) or path to a .yaml file")
+		profilesDir  = flag.String("profiles", "", "extra directory to look up profiles in")
+		hidrawPath   = flag.String("hidraw", "", "force a device path (default: auto-detect)")
+		rate         = flag.Int("rate", 125, "output reports per second")
+		sourceType   = flag.String("source", "", "override the profile's source type (e.g. sim)")
+		dryRun       = flag.Bool("dry-run", false, "do not open a controller; print frames instead")
+		trace        = flag.Bool("trace", false, "log signal values twice per second")
+		list         = flag.Bool("list", false, "list profiles and exit")
+		ipcBroadcast = flag.String("ipc-broadcast", "127.0.0.1:9997", "IPC telemetry broadcast endpoint (empty to disable)")
+		showVer      = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
 
@@ -94,6 +97,44 @@ func run() error {
 	ctx, cancel := context.WithCancel(base)
 	defer cancel()
 
+	var sigServer *ipc.Server
+
+	player, err := radio.NewPlayer(radio.Config{Logger: logger})
+	if err != nil {
+		logger.Printf("radio: player init: %v", err)
+	}
+
+	speechCh := make(chan rules.SpeechEvent, 32)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev := <-speechCh:
+				if player != nil && ev.Clip != "" {
+					_ = player.PlayWithPriority(ctx, ev.Clip, ev.Priority)
+				}
+			}
+		}
+	}()
+
+	engine.SetSpeechHandler(func(ev rules.SpeechEvent) {
+		select {
+		case speechCh <- ev:
+		default:
+		}
+		if sigServer != nil {
+			sigServer.BroadcastSpeech(ipc.SpeechFrame{
+				Name:     ev.Name,
+				Target:   ev.Target,
+				Clip:     ev.Clip,
+				Priority: ev.Priority,
+				Text:     ev.Text,
+				At:       ev.At,
+			})
+		}
+	})
+
 	var dev device.Device
 	if !*dryRun {
 		dev, err = openDevice(ctx, *hidrawPath, logger)
@@ -119,9 +160,23 @@ func run() error {
 			}
 		}()
 	}
+	if *ipcBroadcast != "" {
+		srv, err := ipc.Listen(*ipcBroadcast, logger)
+		if err != nil {
+			logger.Printf("warning: ipc broadcast disabled: %v", err)
+		} else {
+			sigServer = srv
+			defer sigServer.Close()
+			logger.Printf("ipc telemetry broadcaster active on %s", sigServer.Endpoint())
+		}
+	}
+
 	go func() {
 		for f := range frames {
 			set.Apply(f)
+			if sigServer != nil && len(f.Values) > 0 {
+				sigServer.BroadcastSignals(f.Values)
+			}
 		}
 	}()
 

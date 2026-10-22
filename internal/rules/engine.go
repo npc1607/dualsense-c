@@ -3,10 +3,12 @@
 package rules
 
 import (
+	"cmp"
 	"fmt"
 	"log"
 	"math"
-	"sort"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/expr-lang/expr"
@@ -29,20 +31,37 @@ const (
 	targetLightbar    target = "lightbar"
 	targetPlayerLEDs  target = "player_leds"
 	targetMuteLED     target = "mute_led"
+	targetSpeak       target = "speak"
+	targetRadio       target = "radio"
 )
 
+// SpeechEvent represents a triggered companion speech line or radio broadcast.
+type SpeechEvent struct {
+	Name     string
+	Target   string // "speak" | "radio"
+	Clip     string
+	Priority int
+	Text     string
+	At       time.Time
+}
+
 type rule struct {
-	name     string
-	target   target
-	mode     hid.Mode
-	priority int
-	when     *vm.Program
-	value    *vm.Program
-	params   map[int]*vm.Program
-	rgb      [3]*vm.Program
-	modulate *profile.Modulate
-	hold     time.Duration
-	until    time.Time
+	name      string
+	target    target
+	mode      hid.Mode
+	priority  int
+	when      *vm.Program
+	value     *vm.Program
+	params    map[int]*vm.Program
+	rgb       [3]*vm.Program
+	modulate  *profile.Modulate
+	hold      time.Duration
+	until     time.Time
+	clip      string
+	cooldown  time.Duration
+	lastFired time.Time
+	text      string
+	wasActive bool
 }
 
 // Engine turns the current signal values into one controller frame.
@@ -67,6 +86,10 @@ type Engine struct {
 
 	errCount map[string]int
 	errLogAt time.Time
+
+	speechEvents  []SpeechEvent
+	speechMu      sync.Mutex
+	speechHandler func(SpeechEvent)
 }
 
 // New compiles every rule in the profile. Compilation is strict: unknown
@@ -103,7 +126,7 @@ func New(p *profile.Profile, set *signal.Set, logger *log.Logger) (*Engine, erro
 		}
 		e.rules = append(e.rules, r)
 	}
-	sort.SliceStable(e.rules, func(i, j int) bool { return e.rules[i].priority < e.rules[j].priority })
+	slices.SortStableFunc(e.rules, func(a, b *rule) int { return cmp.Compare(a.priority, b.priority) })
 	return e, nil
 }
 
@@ -223,7 +246,7 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 		modulate: pr.Modulate,
 		hold:     pr.Hold.Duration(),
 	}
-	if pr.Effect != "" {
+	if pr.Effect != "" && r.target != targetSpeak && r.target != targetRadio {
 		mode, ok := hid.ParseMode(pr.Effect)
 		if !ok {
 			return fail(fmt.Errorf("unknown effect %q", pr.Effect))
@@ -267,6 +290,17 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 			}
 			r.rgb[i] = prog
 		}
+	case targetSpeak, targetRadio:
+		clip := pr.Clip
+		if clip == "" {
+			clip = pr.Effect
+		}
+		if clip == "" {
+			clip = pr.Value
+		}
+		r.clip = clip
+		r.cooldown = pr.Cooldown.Duration()
+		r.text = pr.Text
 	}
 	return r, nil
 }
@@ -308,11 +342,59 @@ func (e *Engine) Step(now time.Time) hid.Frame {
 
 	var f hid.Frame
 	written := make(map[target]bool, 8)
+	var speechCandidates []SpeechEvent
 	for _, r := range e.rules {
-		if !e.active(r) {
+		isActive := e.active(r)
+		if r.target == targetSpeak || r.target == targetRadio {
+			eligible := false
+			if r.cooldown > 0 {
+				if r.lastFired.IsZero() || now.Sub(r.lastFired) >= r.cooldown {
+					eligible = true
+				}
+			} else {
+				if !r.wasActive {
+					eligible = true
+				}
+			}
+			if isActive && eligible {
+				speechCandidates = append(speechCandidates, SpeechEvent{
+					Name:     r.name,
+					Target:   string(r.target),
+					Clip:     r.clip,
+					Priority: r.priority,
+					Text:     r.text,
+					At:       now,
+				})
+				r.lastFired = now
+			}
+			r.wasActive = isActive
+			continue
+		}
+		if !isActive {
 			continue
 		}
 		e.apply(r, &f, written)
+	}
+	if len(speechCandidates) > 0 {
+		slices.SortStableFunc(speechCandidates, func(a, b SpeechEvent) int {
+			return cmp.Compare(b.Priority, a.Priority)
+		})
+		e.speechMu.Lock()
+		handler := e.speechHandler
+		if handler == nil {
+			e.speechEvents = append(e.speechEvents, speechCandidates...)
+			const maxQueuedSpeechEvents = 64
+			if len(e.speechEvents) > maxQueuedSpeechEvents {
+				e.speechEvents = e.speechEvents[len(e.speechEvents)-maxQueuedSpeechEvents:]
+			}
+		}
+		e.speechMu.Unlock()
+
+		if handler != nil {
+			for _, ev := range speechCandidates {
+				handler(ev)
+			}
+		}
 	}
 	e.decay(&f, written, now)
 
@@ -592,4 +674,20 @@ func clamp8(v float64) uint8 {
 		return 255
 	}
 	return uint8(math.Round(v))
+}
+
+// TakeSpeechEvents extracts and clears all speech events accumulated during Step.
+func (e *Engine) TakeSpeechEvents() []SpeechEvent {
+	e.speechMu.Lock()
+	defer e.speechMu.Unlock()
+	events := e.speechEvents
+	e.speechEvents = nil
+	return events
+}
+
+// SetSpeechHandler configures an optional immediate callback for speech events.
+func (e *Engine) SetSpeechHandler(fn func(SpeechEvent)) {
+	e.speechMu.Lock()
+	defer e.speechMu.Unlock()
+	e.speechHandler = fn
 }

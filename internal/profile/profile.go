@@ -145,6 +145,9 @@ type Rule struct {
 	Priority int               `yaml:"priority"`
 	Hold     Duration          `yaml:"hold"`
 	Modulate *Modulate         `yaml:"modulate"`
+	Clip     string            `yaml:"clip"`     // Audio asset name without extension
+	Cooldown Duration          `yaml:"cooldown"` // Minimum quiet time between firings
+	Text     string            `yaml:"text"`     // Natural language transcript or hint
 }
 
 // Modulate applies low-frequency amplitude modulation (a rumble buzz).
@@ -235,10 +238,14 @@ func (p *Profile) Validate() error {
 					return fmt.Errorf("profile %s: %s: lightbar needs params.r/g/b", p.Name, label)
 				}
 			}
+		case "speak", "radio":
+			if r.Clip == "" && r.Effect == "" && r.Value == "" {
+				return fmt.Errorf("profile %s: %s: target %s requires clip, effect, or value", p.Name, label, r.Target)
+			}
 		default:
 			return fmt.Errorf("profile %s: %s: unknown target %q", p.Name, label, r.Target)
 		}
-		if r.Effect != "" {
+		if r.Effect != "" && r.Target != "speak" && r.Target != "radio" {
 			switch r.Effect {
 			case "off", "rigid", "section", "pulse", "feedback", "weapon",
 				"vibration", "slope_feedback", "slope", "slope_weapon", "machine":

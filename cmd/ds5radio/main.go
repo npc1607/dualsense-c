@@ -11,10 +11,12 @@ import (
 	"log"
 	"os"
 	ossignal "os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/npc1607/dualsense-c/internal/radio"
+	"github.com/npc1607/dualsense-c/internal/vpad/ipc"
 )
 
 var version = "dev"
@@ -25,6 +27,11 @@ func main() {
 		clipsDir    = flag.String("clips", "", "path to directory with .wav radio clips")
 		listenAddr  = flag.String("listen", "127.0.0.1:9999", "UDP telemetry address to listen on")
 		decoderName = flag.String("decoder", "acshm", "telemetry decoder (acshm, forza, dirt, outgauge)")
+		ipcEndpoint = flag.String("ipc", ipc.DefaultSignalEndpoint, "IPC telemetry broadcast endpoint (empty to use UDP)")
+		useLLM      = flag.Bool("llm", false, "enable local SLM/LLM inference engine for dynamic commentary")
+		llmEndpoint = flag.String("llm-endpoint", "", "LLM HTTP endpoint (default: $DS5_LLM_ENDPOINT or 127.0.0.1:9995)")
+		llmModel    = flag.String("llm-model", "", "LLM model identifier (default: $DS5_LLM_MODEL or qwen2.5:0.5b)")
+		personaName = flag.String("persona", "rally", "active companion persona: rally, f1, mech, souls, isaac")
 		showVer     = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Usage = func() {
@@ -88,12 +95,46 @@ func main() {
 		}
 	case "listen":
 		monitor := radio.NewMonitor(player, logger)
-		logger.Printf("starting radio monitor on %s (decoder: %s)...", *listenAddr, *decoderName)
-		if err := monitor.Run(ctx, *listenAddr, *decoderName); err != nil {
-			logger.Fatalf("monitor: %v", err)
+		defer monitor.Close()
+
+		if *useLLM || *llmEndpoint != "" {
+			persona := resolvePersona(*personaName)
+			engine := radio.NewHTTPLLMEngine(*llmEndpoint, *llmModel)
+			llmClassifier := radio.NewLLMClassifier(engine, persona, logger)
+			monitor.SetClassifier(llmClassifier)
+			logger.Printf("attached LLM classifier (persona: %s, endpoint: %s)", persona.Name, radio.ResolveLLMEndpoint(*llmEndpoint))
+		}
+
+		if *ipcEndpoint != "" {
+			logger.Printf("subscribing to ds5d IPC telemetry on %s...", *ipcEndpoint)
+			if err := monitor.RunIPC(ctx, *ipcEndpoint); err != nil && ctx.Err() == nil {
+				logger.Fatalf("ipc monitor: %v", err)
+			}
+		} else {
+			logger.Printf("starting fallback UDP telemetry on %s (decoder: %s)...", *listenAddr, *decoderName)
+			if err := monitor.RunUDP(ctx, *listenAddr, *decoderName); err != nil && ctx.Err() == nil {
+				logger.Fatalf("udp monitor: %v", err)
+			}
 		}
 	default:
 		logger.Fatalf("unknown command %q (see ds5radio -h)", args[0])
+	}
+}
+
+func resolvePersona(name string) radio.Persona {
+	switch strings.ToLower(name) {
+	case "f1":
+		return radio.PersonaF1Engineer
+	case "mech":
+		return radio.PersonaTacticalMech
+	case "souls":
+		return radio.PersonaSoulsCompanion
+	case "isaac":
+		return radio.PersonaRoguelikeNarrator
+	case "rally":
+		fallthrough
+	default:
+		return radio.PersonaRallyCoDriver
 	}
 }
 

@@ -9,21 +9,28 @@
 //     and outputs 0 error noise.
 //   - TCP_NODELAY enabled for instantaneous loopback dispatch.
 //   - Connection-oriented with automatic reconnect and multi-subscriber support.
+//   - Dedicated per-subscriber worker queues with non-blocking drops to eliminate
+//     head-of-line blocking on the 125Hz input thread.
 package ipc
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/npc1607/dualsense-c/internal/signal"
 	"github.com/npc1607/dualsense-c/internal/vpad"
 )
 
@@ -32,6 +39,21 @@ const Magic uint32 = 0x31424646
 
 // MagicSig identifies a telemetry signal frame ("SIG1").
 const MagicSig uint32 = 0x31474953
+
+// MagicSpeech identifies a companion speech broadcast frame ("SPK1").
+const MagicSpeech uint32 = 0x31505343
+
+// DefaultSignalEndpoint is the standard loopback IPC address for telemetry broadcasting.
+const DefaultSignalEndpoint = "127.0.0.1:9997"
+
+// SigHeaderSize is the 12-byte header for SIG1 frames.
+const SigHeaderSize = 12
+
+// SigItemSize is the 5-byte payload item (1-byte ID + 4-byte Float32).
+const SigItemSize = 5
+
+// SpeechHeaderSize is the 8-byte header for SPK1 frames (4-byte magic + 4-byte payload size).
+const SpeechHeaderSize = 8
 
 // FrameSize is the 12-byte wire format for FFB1:
 //
@@ -67,13 +89,24 @@ func ParseEndpoint(ep string) (network, address string) {
 	return "tcp", ep
 }
 
+// SpeechFrame represents a companion voice or radio event broadcast over IPC.
+type SpeechFrame struct {
+	Seq      uint32    `json:"seq"`
+	Name     string    `json:"name"`
+	Target   string    `json:"target"`
+	Clip     string    `json:"clip"`
+	Priority int       `json:"priority"`
+	Text     string    `json:"text"`
+	At       time.Time `json:"at"`
+}
+
 // Server provides low-latency event-driven force feedback IPC.
 type Server struct {
 	listener net.Listener
 	logger   *log.Logger
 
 	mu      sync.RWMutex
-	clients map[net.Conn]struct{}
+	clients map[net.Conn]chan []byte
 	seq     uint32
 	closed  atomic.Bool
 
@@ -95,7 +128,7 @@ func Listen(endpoint string, logger *log.Logger) (*Server, error) {
 	s := &Server{
 		listener: l,
 		logger:   logger,
-		clients:  make(map[net.Conn]struct{}),
+		clients:  make(map[net.Conn]chan []byte),
 	}
 	go s.acceptLoop()
 	return s, nil
@@ -129,13 +162,53 @@ func (s *Server) acceptLoop() {
 			_ = tc.SetKeepAlive(true)
 		}
 
+		ch := make(chan []byte, 64)
+
 		s.mu.Lock()
-		s.clients[conn] = struct{}{}
+		s.clients[conn] = ch
 		cnt := len(s.clients)
 		s.mu.Unlock()
 
 		s.logger.Printf("vpad/ipc: client connected from %s (%d active subscriber%s)",
 			conn.RemoteAddr(), cnt, plural(cnt))
+
+		go s.clientWriter(conn, ch)
+	}
+}
+
+func (s *Server) clientWriter(c net.Conn, ch chan []byte) {
+	defer func() {
+		s.mu.Lock()
+		delete(s.clients, c)
+		cnt := len(s.clients)
+		s.mu.Unlock()
+		_ = c.Close()
+		s.logger.Printf("vpad/ipc: disconnected subscriber %s (%d active)",
+			c.RemoteAddr(), cnt)
+	}()
+
+	for frame := range ch {
+		_ = c.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
+		if _, err := c.Write(frame); err != nil {
+			return
+		}
+	}
+}
+
+func (s *Server) broadcastRaw(frame []byte) {
+	if s.closed.Load() {
+		return
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed.Load() {
+		return
+	}
+	for _, ch := range s.clients {
+		select {
+		case ch <- frame:
+		default: // Drop immediately if subscriber queue is full; never block 125Hz hot path!
+		}
 	}
 }
 
@@ -156,10 +229,7 @@ func (s *Server) Subscribers() int {
 // Broadcast pushes a force-feedback rumble event immediately to all active subscribers.
 // If no subscribers are connected, it returns immediately without any I/O or log noise.
 func (s *Server) Broadcast(r vpad.Rumble) {
-	s.mu.RLock()
-	n := len(s.clients)
-	s.mu.RUnlock()
-	if n == 0 {
+	if s.Subscribers() == 0 {
 		return
 	}
 
@@ -170,26 +240,7 @@ func (s *Server) Broadcast(r vpad.Rumble) {
 	frame[5] = r.Right
 	binary.LittleEndian.PutUint32(frame[8:], seq)
 
-	s.mu.RLock()
-	var dead []net.Conn
-	for conn := range s.clients {
-		_ = conn.SetWriteDeadline(time.Now().Add(50 * time.Millisecond))
-		if _, err := conn.Write(frame[:]); err != nil {
-			dead = append(dead, conn)
-		}
-	}
-	s.mu.RUnlock()
-
-	if len(dead) > 0 {
-		s.mu.Lock()
-		for _, conn := range dead {
-			delete(s.clients, conn)
-			_ = conn.Close()
-			s.logger.Printf("vpad/ipc: disconnected subscriber %s (%d active)",
-				conn.RemoteAddr(), len(s.clients))
-		}
-		s.mu.Unlock()
-	}
+	s.broadcastRaw(frame[:])
 
 	// Schedule decay if active effect stops refreshing
 	s.expireMu.Lock()
@@ -204,6 +255,197 @@ func (s *Server) Broadcast(r vpad.Rumble) {
 	s.expireMu.Unlock()
 }
 
+type sigPair struct {
+	id  uint8
+	val float32
+}
+
+// EncodeSignalFrame encodes active signals into a SIG1 binary wire frame:
+//
+//	0..3:  Magic ("SIG1", little endian uint32 0x31474953)
+//	4..5:  Version (uint16 LE, 1)
+//	6..7:  Signal Count N (uint16 LE)
+//	8..11: Monotonic sequence number (uint32 LE)
+//	12..:  N * 5 bytes: 1-byte Signal ID + 4-byte Float32 (LE)
+func EncodeSignalFrame(seq uint32, signals map[string]float32) []byte {
+	pairs := make([]sigPair, 0, len(signals))
+	for name, val := range signals {
+		if id, ok := signal.ID(name); ok {
+			pairs = append(pairs, sigPair{id: id, val: val})
+		}
+	}
+	slices.SortFunc(pairs, func(a, b sigPair) int {
+		return cmp.Compare(a.id, b.id)
+	})
+
+	buf := make([]byte, SigHeaderSize+len(pairs)*SigItemSize)
+	binary.LittleEndian.PutUint32(buf[0:4], MagicSig)
+	binary.LittleEndian.PutUint16(buf[4:6], 1)
+	binary.LittleEndian.PutUint16(buf[6:8], uint16(len(pairs)))
+	binary.LittleEndian.PutUint32(buf[8:12], seq)
+
+	offset := SigHeaderSize
+	for _, p := range pairs {
+		buf[offset] = p.id
+		binary.LittleEndian.PutUint32(buf[offset+1:offset+5], math.Float32bits(p.val))
+		offset += SigItemSize
+	}
+	return buf
+}
+
+// DecodeSignalFrame decodes an incoming SIG1 wire frame buffer.
+func DecodeSignalFrame(b []byte) (seq uint32, signals map[string]float32, ok bool) {
+	if len(b) < SigHeaderSize {
+		return 0, nil, false
+	}
+	if binary.LittleEndian.Uint32(b[0:4]) != MagicSig {
+		return 0, nil, false
+	}
+	ver := binary.LittleEndian.Uint16(b[4:6])
+	if ver != 1 {
+		return 0, nil, false
+	}
+	count := binary.LittleEndian.Uint16(b[6:8])
+	expected := SigHeaderSize + int(count)*SigItemSize
+	if len(b) < expected {
+		return 0, nil, false
+	}
+	seq = binary.LittleEndian.Uint32(b[8:12])
+	signals = make(map[string]float32, count)
+	offset := SigHeaderSize
+	for i := 0; i < int(count); i++ {
+		id := b[offset]
+		bits := binary.LittleEndian.Uint32(b[offset+1 : offset+5])
+		val := math.Float32frombits(bits)
+		if name := signal.Name(id); name != "" {
+			signals[name] = val
+		}
+		offset += SigItemSize
+	}
+	return seq, signals, true
+}
+
+// ReadSignalFrame reads exactly one SIG1 telemetry frame from r.
+func ReadSignalFrame(r io.Reader) (seq uint32, signals map[string]float32, err error) {
+	var hdr [SigHeaderSize]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return 0, nil, err
+	}
+	if binary.LittleEndian.Uint32(hdr[0:4]) != MagicSig {
+		return 0, nil, errors.New("vpad/ipc: invalid signal frame magic")
+	}
+	ver := binary.LittleEndian.Uint16(hdr[4:6])
+	if ver != 1 {
+		return 0, nil, fmt.Errorf("vpad/ipc: unsupported signal frame version %d", ver)
+	}
+	count := binary.LittleEndian.Uint16(hdr[6:8])
+	if count > 1024 {
+		return 0, nil, fmt.Errorf("vpad/ipc: signal frame count too large (%d)", count)
+	}
+	seq = binary.LittleEndian.Uint32(hdr[8:12])
+	signals = make(map[string]float32, count)
+	if count > 0 {
+		payload := make([]byte, int(count)*SigItemSize)
+		if _, err := io.ReadFull(r, payload); err != nil {
+			return 0, nil, err
+		}
+		offset := 0
+		for i := 0; i < int(count); i++ {
+			id := payload[offset]
+			bits := binary.LittleEndian.Uint32(payload[offset+1 : offset+5])
+			val := math.Float32frombits(bits)
+			if name := signal.Name(id); name != "" {
+				signals[name] = val
+			}
+			offset += SigItemSize
+		}
+	}
+	return seq, signals, nil
+}
+
+// BroadcastSignals pushes a telemetry signal frame immediately to all active subscribers.
+// If no subscribers are connected, it returns immediately without memory allocation or I/O.
+func (s *Server) BroadcastSignals(signals map[string]float32) {
+	if s.Subscribers() == 0 {
+		return
+	}
+
+	seq := atomic.AddUint32(&s.seq, 1)
+	frame := EncodeSignalFrame(seq, signals)
+	s.broadcastRaw(frame)
+}
+
+// EncodeSpeechFrame encodes a SpeechFrame into an SPK1 binary wire frame:
+//
+//	0..3:  Magic ("SPK1", little endian uint32 0x31505343)
+//	4..7:  Payload length N (uint32 LE)
+//	8..:   N bytes JSON payload
+func EncodeSpeechFrame(seq uint32, frame SpeechFrame) []byte {
+	frame.Seq = seq
+	if frame.At.IsZero() {
+		frame.At = time.Now()
+	}
+	raw, _ := json.Marshal(frame)
+	buf := make([]byte, SpeechHeaderSize+len(raw))
+	binary.LittleEndian.PutUint32(buf[0:4], MagicSpeech)
+	binary.LittleEndian.PutUint32(buf[4:8], uint32(len(raw)))
+	copy(buf[SpeechHeaderSize:], raw)
+	return buf
+}
+
+// DecodeSpeechFrame decodes an incoming SPK1 speech frame buffer.
+func DecodeSpeechFrame(b []byte) (frame SpeechFrame, ok bool) {
+	if len(b) < SpeechHeaderSize {
+		return SpeechFrame{}, false
+	}
+	if binary.LittleEndian.Uint32(b[0:4]) != MagicSpeech {
+		return SpeechFrame{}, false
+	}
+	payloadLen := binary.LittleEndian.Uint32(b[4:8])
+	if uint32(len(b)-SpeechHeaderSize) < payloadLen {
+		return SpeechFrame{}, false
+	}
+	if err := json.Unmarshal(b[SpeechHeaderSize:SpeechHeaderSize+payloadLen], &frame); err != nil {
+		return SpeechFrame{}, false
+	}
+	return frame, true
+}
+
+// ReadSpeechFrame reads exactly one SPK1 speech event frame from r.
+func ReadSpeechFrame(r io.Reader) (SpeechFrame, error) {
+	var hdr [SpeechHeaderSize]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return SpeechFrame{}, err
+	}
+	if binary.LittleEndian.Uint32(hdr[0:4]) != MagicSpeech {
+		return SpeechFrame{}, errors.New("vpad/ipc: invalid speech frame magic")
+	}
+	length := binary.LittleEndian.Uint32(hdr[4:8])
+	if length > 65536 {
+		return SpeechFrame{}, fmt.Errorf("vpad/ipc: speech frame too large (%d)", length)
+	}
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return SpeechFrame{}, err
+	}
+	var frame SpeechFrame
+	if err := json.Unmarshal(payload, &frame); err != nil {
+		return SpeechFrame{}, fmt.Errorf("vpad/ipc: unmarshal speech frame: %w", err)
+	}
+	return frame, nil
+}
+
+// BroadcastSpeech pushes a companion speech event frame to all active subscribers.
+func (s *Server) BroadcastSpeech(frame SpeechFrame) {
+	if s.Subscribers() == 0 {
+		return
+	}
+
+	seq := atomic.AddUint32(&s.seq, 1)
+	raw := EncodeSpeechFrame(seq, frame)
+	s.broadcastRaw(raw)
+}
+
 // Close destroys the listener and closes all connected clients.
 func (s *Server) Close() error {
 	if s.closed.Swap(true) {
@@ -216,10 +458,11 @@ func (s *Server) Close() error {
 	s.expireMu.Unlock()
 
 	s.mu.Lock()
-	for conn := range s.clients {
+	for conn, ch := range s.clients {
 		_ = conn.Close()
+		close(ch)
 	}
-	s.clients = nil
+	s.clients = make(map[net.Conn]chan []byte)
 	s.mu.Unlock()
 
 	if s.listener != nil {

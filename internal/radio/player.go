@@ -15,11 +15,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // DefaultClipsDir points to the repository's assets/radio directory.
@@ -30,10 +32,15 @@ type Player struct {
 	sinkName string
 	clipsDir string
 	logger   *log.Logger
+	style    AcousticStyle
 
-	mu      sync.Mutex
-	busy    bool
-	current string
+	mu            sync.Mutex
+	busy          bool
+	current       string
+	currentPri    int
+	cancelCurrent context.CancelFunc
+	currentGen    uint64
+	currentDone   chan struct{}
 }
 
 // Config configures the Player.
@@ -66,6 +73,13 @@ func NewPlayer(cfg Config) (*Player, error) {
 		clipsDir: cfg.ClipsDir,
 		logger:   cfg.Logger,
 	}, nil
+}
+
+// SetStyle configures the active DSP acoustic style filter.
+func (p *Player) SetStyle(style AcousticStyle) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.style = style
 }
 
 // FindDualSenseSink scans PulseAudio / PipeWire for the DualSense 4-channel sink.
@@ -107,31 +121,144 @@ func FindDualSenseSink() (string, error) {
 	return "", errors.New("dualsense audio sink not found")
 }
 
-// Play plays an audio file by name or path. If a clip is already playing,
-// Play drops or ignores overlapping speech to maintain clear radio discipline.
-func (p *Player) Play(ctx context.Context, clipName string) error {
+// IsBusy reports whether the player is currently executing audio playback.
+func (p *Player) IsBusy() bool {
 	p.mu.Lock()
-	if p.busy {
-		p.mu.Unlock()
-		return fmt.Errorf("radio busy: currently playing %s", p.current)
+	defer p.mu.Unlock()
+	return p.busy
+}
+
+// Play plays an audio file by name or path at normal priority (0).
+func (p *Player) Play(ctx context.Context, clipName string) error {
+	return p.PlayWithPriority(ctx, clipName, 0)
+}
+
+func (p *Player) resolveFallbackBeep() string {
+	beepPath := filepath.Join(p.clipsDir, "beep_in.wav")
+	if _, err := os.Stat(beepPath); err == nil {
+		return beepPath
 	}
+	fallbackPath := filepath.Join(os.TempDir(), "ds5_fallback_beep.wav")
+	if _, err := os.Stat(fallbackPath); err == nil {
+		return fallbackPath
+	}
+
+	sampleRate := 48000
+	numSamples := int(0.1 * float64(sampleRate))
+	samples := make([]float32, numSamples)
+	ramp := int(0.005 * float64(sampleRate))
+	for i := 0; i < numSamples; i++ {
+		t := float64(i) / float64(sampleRate)
+		env := 1.0
+		if i < ramp {
+			env = float64(i) / float64(ramp)
+		} else if i > numSamples-ramp {
+			env = float64(numSamples-i) / float64(ramp)
+		}
+		samples[i] = float32(0.5 * env * math.Sin(2.0*math.Pi*800.0*t))
+	}
+	tmpPath := fmt.Sprintf("%s.tmp.%d.%d", fallbackPath, os.Getpid(), time.Now().UnixNano())
+	f, err := os.Create(tmpPath)
+	if err == nil {
+		_ = WriteWAV(f, samples, sampleRate)
+		_ = f.Close()
+		_ = os.Rename(tmpPath, fallbackPath)
+	}
+	return fallbackPath
+}
+
+// PlayWithPriority plays an audio file with preemption support. If an audio
+// clip is already playing, incoming speech can preempt it if its priority
+// is at least 30 levels higher (e.g. Crash 100 preempts Pace 30).
+func (p *Player) PlayWithPriority(ctx context.Context, clipName string, priority int) error {
+	// 1. Pre-validate file path and apply graceful fallback beep if missing
+	filePath := p.resolvePath(clipName)
+	if _, err := os.Stat(filePath); err != nil {
+		if p.logger != nil {
+			p.logger.Printf("radio/player: clip %q not found, using fallback beep", clipName)
+		}
+		filePath = p.resolveFallbackBeep()
+	}
+
+	// 2. Apply DSP acoustic styling if configured
+	finalPath := filePath
+	p.mu.Lock()
+	style := p.style
+	p.mu.Unlock()
+
+	if style != "" && style != StyleStudio {
+		styledName := fmt.Sprintf("ds5_styled_%s_%s", style, filepath.Base(filePath))
+		styledPath := filepath.Join(os.TempDir(), styledName)
+		if fi, err := os.Stat(styledPath); err != nil || fi.Size() == 0 {
+			if err := ProcessWAV(filePath, styledPath, style); err == nil {
+				finalPath = styledPath
+			}
+		} else {
+			finalPath = styledPath
+		}
+	}
+
+	// 3. Preemption handling: wait for previous player process to fully terminate
+	for {
+		p.mu.Lock()
+		if !p.busy {
+			break
+		}
+		if priority < p.currentPri+30 || p.cancelCurrent == nil {
+			cur := p.current
+			curPri := p.currentPri
+			p.mu.Unlock()
+			return fmt.Errorf("radio busy: currently playing %s (pri %d)", cur, curPri)
+		}
+
+		if p.logger != nil {
+			p.logger.Printf("radio/player: preempting %q (pri %d) with %q (pri %d)",
+				p.current, p.currentPri, clipName, priority)
+		}
+		oldDone := p.currentDone
+		p.cancelCurrent()
+		p.cancelCurrent = nil
+		if oldDone == nil {
+			p.busy = false
+			break
+		}
+		p.mu.Unlock()
+
+		select {
+		case <-oldDone:
+		case <-time.After(500 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	p.currentGen++
+	thisGen := p.currentGen
+	playCtx, cancel := context.WithCancel(ctx)
+	doneCh := make(chan struct{})
+
 	p.busy = true
 	p.current = clipName
+	p.currentPri = priority
+	p.cancelCurrent = cancel
+	p.currentDone = doneCh
 	p.mu.Unlock()
 
 	defer func() {
 		p.mu.Lock()
-		p.busy = false
-		p.current = ""
+		if p.currentGen == thisGen {
+			p.busy = false
+			p.current = ""
+			p.currentPri = 0
+			p.cancelCurrent = nil
+			p.currentDone = nil
+		}
 		p.mu.Unlock()
+		cancel()
+		close(doneCh)
 	}()
 
-	filePath := p.resolvePath(clipName)
-	if _, err := os.Stat(filePath); err != nil {
-		return fmt.Errorf("radio clip %q not found: %w", filePath, err)
-	}
-
-	return p.playFile(ctx, filePath)
+	return p.playFile(playCtx, finalPath)
 }
 
 func (p *Player) playFile(ctx context.Context, filePath string) error {
@@ -148,6 +275,9 @@ func (p *Player) playFile(ctx context.Context, filePath string) error {
 		if err := cmd.Run(); err == nil {
 			return nil
 		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 	}
 
 	// Try paplay (standard PulseAudio)
@@ -160,6 +290,9 @@ func (p *Player) playFile(ctx context.Context, filePath string) error {
 		cmd := exec.CommandContext(ctx, "paplay", args...)
 		if err := cmd.Run(); err == nil {
 			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
 
@@ -210,4 +343,13 @@ func findClipsDir() string {
 		}
 	}
 	return DefaultClipsDir
+}
+
+// Stop interrupts any running playback immediately.
+func (p *Player) Stop() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cancelCurrent != nil {
+		p.cancelCurrent()
+	}
 }

@@ -168,7 +168,7 @@ DualSense (DS5) 的物理执行上限**不在 HID 协议，而在信号输入源
 | **触控板坐标 / 电池与充电状态** | [支持] 100% | 1920×1080 触控坐标 (`touch_x/y`)、电量 (`battery`) 与充电标志 (`charging`) |
 | **指示灯全系控制** | [支持] 100% | RGB 状态灯条 (`lightbar`)、静音键指示灯 (`mute_led`)、5 颗玩家指示灯 (`player_leds`) |
 | **高清音圈触感 (Voice-Coil)** | [支持] 可用（Linux 实测） | `sink/haptics` 往 USB 声卡 Ch3/4 写 48kHz PCM（`haptic_left/haptic_right`）。**前提**：HID 报告空闲时不得声明 `COMPATIBLE_VIBRATION/HAPTICS_SELECT`，否则执行器被锁在 HID 引擎上、音频流被忽略 |
-| **手柄内置扬声器** | [需验证] 通路已验证，无专用 sink | Ch1/2 实测可出声；任何能写 PipeWire sink 的工具都能用，本项目未封装 |
+| **手柄内置扬声器 (Companion Audio)** | [支持] 100%（全品类伴生语音与电台） | Ch1/2 独立路由（与 Ch3/4 音圈物理隔离）。支持声明式 `target: speak` / `target: radio`、4 种 DSP 声学风格（对讲机/原声/机甲/耳语）、Qwen2.5-0.5B 本地端侧大模型情境推理与 `ds5radio` 伴生广播器 |
 
 > **Wiki**：分主题的教程与排错手册 —— <https://github.com/npc1607/dualsense-c/wiki>
 > （源文件在 `wiki/`，`./scripts/publish-wiki.sh` 一键发布）

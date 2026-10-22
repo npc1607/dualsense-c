@@ -1,0 +1,67 @@
+# 艾尔登法环 / 魂系动作（Souls-like 伴生战术系统）
+name: souls
+title: 艾尔登法环 / 魂系动作（Souls-like 伴生战术系统）
+description: |
+  魂系/硬核动作通用 DualSense 伴生配置：
+  精力枯竭预警、原素瓶使用提醒、致命处决危险提示，搭配 L2 盾反强阻力与 R2 重攻击蓄力反馈。
+
+source:
+  type: sim
+  rate_hz: 125
+
+shape:
+  l2: { deadzone: 0.05 }
+  r2: { deadzone: 0.05 }
+
+safety:
+  signal_ttl: 500ms
+  release: 200ms
+  status_lightbar: true
+
+rules:
+  # 精力不足预警
+  - name: souls-stamina-low
+    when: "has('stamina') && stamina <= 0.15 && stamina >= 0.0"
+    target: speak
+    clip: "stamina_low"
+    priority: 60
+    cooldown: 6s
+    text: "精力枯竭，退后重整防线..."
+
+  # 濒死原素瓶提醒
+  - name: souls-critical-hp
+    when: "hp > 0 && hp <= 0.2"
+    target: speak
+    clip: "estus_flask"
+    priority: 90
+    cooldown: 10s
+    text: "饮下原素瓶吧，切勿贪刀..."
+
+  # 弹反致命处决 / 处决破绽
+  - name: souls-parry-hazard
+    when: "hazard > 0.8"
+    target: radio
+    clip: "fatal_blow"
+    priority: 95
+    cooldown: 12s
+    text: "致命破绽！"
+
+  # L2 盾反阻尼
+  - name: l2-parry-resist
+    when: "l2 > 0.05"
+    target: l2
+    effect: feedback
+    priority: 20
+    params:
+      start: "1"
+      force: "220"
+
+  # R2 重攻击段落感
+  - name: r2-heavy-attack
+    when: "r2 > 0.05"
+    target: r2
+    effect: section
+    priority: 20
+    params:
+      start: "3"
+      end: "8"

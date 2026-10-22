@@ -1,0 +1,68 @@
+# 以撒的结合：忏悔（Roguelike 肉鸽伴生系统）
+name: isaac
+title: 以撒的结合：忏悔（Roguelike 肉鸽伴生系统）
+description: |
+  肉鸽品类通用 DualSense 伴生配置：
+  低生命值语音警告、Boss 房强敌警报、炸弹安放提示音，搭配 L2 道具充能感与 R2 射击段落感扳机。
+
+source:
+  type: sim
+  rate_hz: 125
+
+shape:
+  l2: { deadzone: 0.05 }
+  r2: { deadzone: 0.05 }
+
+safety:
+  signal_ttl: 500ms
+  release: 200ms
+  status_lightbar: true
+
+rules:
+  # 濒危生命预警
+  - name: isaac-low-hp
+    when: "hp > 0 && hp <= 1.0"
+    target: speak
+    clip: "low_hp_warning"
+    priority: 85
+    cooldown: 8s
+    text: "生命值垂危，快找红心！"
+
+  # Boss 房/强敌侦测
+  - name: isaac-boss-hazard
+    when: "hazard >= 1.0"
+    target: radio
+    clip: "boss_intro"
+    priority: 75
+    cooldown: 20s
+    text: "侦测到强敌反应，准备迎战！"
+
+  # 炸弹安放按键响应
+  - name: isaac-bomb
+    when: 'pressed("square")'
+    target: speak
+    clip: "bomb_placed"
+    priority: 40
+    cooldown: 2s
+    text: "炸弹已放置！"
+
+  # R2 眼泪发射：手枪扳机手感
+  - name: r2-tear-fire
+    when: "r2 > 0.05"
+    target: r2
+    effect: weapon
+    priority: 10
+    params:
+      start: "2"
+      end: "7"
+      force: "160"
+
+  # L2 主动道具阻力
+  - name: l2-item-resist
+    when: "l2 > 0.05"
+    target: l2
+    effect: rigid
+    priority: 10
+    params:
+      start: "1"
+      force: "200"

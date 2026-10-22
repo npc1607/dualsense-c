@@ -45,31 +45,33 @@ var Standard = []string{
 	// Audio AI event detector signals (ambient surface & sound events)
 	"surface_water", "surface_metal", "surface_wood", "surface_gravel",
 	"audio_gunshot", "audio_explosion", "audio_impact",
+
+	// Radio / pit strategy signals
+	"box", "pit",
+
+	// Cross-genre companion signals (Roguelike, Souls-like, Tactical FPS)
+	"hp", "stamina", "mana", "hazard",
 }
 
-var standard = func() map[string]struct{} {
-	m := make(map[string]struct{}, len(Standard))
-	for _, n := range Standard {
-		m[n] = struct{}{}
+var standardIDs = func() map[string]uint8 {
+	m := make(map[string]uint8, len(Standard))
+	for i, n := range Standard {
+		m[n] = uint8(i)
 	}
 	return m
 }()
 
 // IsStandard reports whether name belongs to the built-in vocabulary.
 func IsStandard(name string) bool {
-	_, ok := standard[name]
+	_, ok := standardIDs[name]
 	return ok
 }
 
 // ID returns the wire id of a signal name. The bridge sends ids instead of
 // strings, so both sides must be built from the same vocabulary.
 func ID(name string) (uint8, bool) {
-	for i, n := range Standard {
-		if n == name {
-			return uint8(i), true
-		}
-	}
-	return 0, false
+	id, ok := standardIDs[name]
+	return id, ok
 }
 
 // Name returns the signal name for a wire id, or "" if unknown.

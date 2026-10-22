@@ -25,6 +25,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/npc1607/dualsense-c/internal/aim"
+	"github.com/npc1607/dualsense-c/internal/profile"
 )
 
 // ErrUnsupported is returned on platforms without a virtual-pad backend yet.
@@ -72,6 +75,9 @@ type Config struct {
 
 	// Deadzone is an optional tuning knob for the input mapping.
 	Deadzone float32
+
+	// Aim holds optional stick curves, gyro blending, and anti-recoil configuration.
+	Aim *profile.AimConfig
 
 	// Logger receives diagnostics.
 	Logger interface {
@@ -144,4 +150,45 @@ func Open(cfg Config, sink RumbleSink) (Pad, error) {
 		return nil, fmt.Errorf("vpad: unsupported protocol %q (did you blank-import vpad/all?)", cfg.Protocol)
 	}
 	return b(cfg, sink)
+}
+
+// NewAimProcessor creates an aim.Processor from a profile.AimConfig, or nil if cfg is nil.
+func NewAimProcessor(cfg *profile.AimConfig) *aim.Processor {
+	if cfg == nil {
+		return nil
+	}
+	return aim.NewProcessor(
+		aim.CurveConfig{
+			Type:          aim.CurveType(cfg.Curve.Type),
+			Exponent:      cfg.Curve.Exponent,
+			MidPoint:      cfg.Curve.MidPoint,
+			InnerDeadzone: cfg.Curve.InnerDeadzone,
+			OuterBoost:    cfg.Curve.OuterBoost,
+		},
+		aim.FilterConfig{
+			Type:      aim.FilterType(cfg.Filter.Type),
+			MinCutoff: cfg.Filter.MinCutoff,
+			Beta:      cfg.Filter.Beta,
+			DCutoff:   cfg.Filter.DCutoff,
+		},
+		aim.GyroConfig{
+			Enabled:          cfg.Gyro.Enabled,
+			Trigger:          aim.GyroTriggerType(cfg.Gyro.Trigger),
+			TriggerThreshold: cfg.Gyro.TriggerThreshold,
+			NaturalAngleDeg:  cfg.Gyro.NaturalAngleDeg,
+			DeadzoneDPS:      cfg.Gyro.DeadzoneDPS,
+			SensYaw:          cfg.Gyro.SensYaw,
+			SensPitch:        cfg.Gyro.SensPitch,
+			InvertPitch:      cfg.Gyro.InvertPitch,
+		},
+		aim.AntiRecoilConfig{
+			Enabled:      cfg.AntiRecoil.Enabled,
+			Trigger:      cfg.AntiRecoil.Trigger,
+			StartDelay:   cfg.AntiRecoil.StartDelay.Duration(),
+			BurstForce:   cfg.AntiRecoil.BurstForce,
+			BurstDecay:   cfg.AntiRecoil.BurstDecay,
+			SustainForce: cfg.AntiRecoil.SustainForce,
+			JitterNoise:  cfg.AntiRecoil.JitterNoise,
+		},
+	)
 }

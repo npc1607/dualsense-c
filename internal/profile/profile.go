@@ -48,15 +48,69 @@ const (
 
 // Profile is one game (or one game-agnostic behaviour) definition.
 type Profile struct {
-	Name        string   `yaml:"name"`
-	Title       string   `yaml:"title"`
-	Description string   `yaml:"description"`
-	Source      Source   `yaml:"source"`
-	Shape       Shapers  `yaml:"shape"`
-	Safety      Safety   `yaml:"safety"`
-	Extra       []string `yaml:"signals"` // extra signal names this profile may use
-	Rules       []Rule   `yaml:"rules"`
-	Haptics     *Haptics `yaml:"haptics"` // optional voice-coil output
+	Name        string      `yaml:"name"`
+	Title       string      `yaml:"title"`
+	Description string      `yaml:"description"`
+	Source      Source      `yaml:"source"`
+	Shape       Shapers     `yaml:"shape"`
+	Safety      Safety      `yaml:"safety"`
+	Extra       []string    `yaml:"signals"` // extra signal names this profile may use
+	Rules       []Rule      `yaml:"rules"`
+	Haptics     *Haptics    `yaml:"haptics"` // optional voice-coil output
+	Aim         *AimConfig  `yaml:"aim"`
+	AimAssist   *AimConfig  `yaml:"aim_assist"` // Backward compatible alias for fps-aim.yaml
+}
+
+// AimConfig defines stick shaping, gyro aiming, and anti-recoil enhancements.
+type AimConfig struct {
+	Curve      AimCurveConfig      `yaml:"curve"`
+	Filter     AimFilterConfig     `yaml:"filter"`
+	Gyro       AimGyroConfig       `yaml:"gyro"`
+	AntiRecoil AimAntiRecoilConfig `yaml:"anti_recoil"`
+}
+
+type AimCurveConfig struct {
+	Type          string  `yaml:"type"`
+	Exponent      float64 `yaml:"exponent"`
+	MidPoint      float64 `yaml:"mid_point"`
+	InnerDeadzone float64 `yaml:"inner_deadzone"`
+	OuterBoost    float64 `yaml:"outer_boost"`
+}
+
+type AimFilterConfig struct {
+	Type      string  `yaml:"type"`
+	MinCutoff float64 `yaml:"min_cutoff"`
+	Beta      float64 `yaml:"beta"`
+	DCutoff   float64 `yaml:"d_cutoff"`
+}
+
+type AimGyroConfig struct {
+	Enabled          bool    `yaml:"enabled"`
+	Trigger          string  `yaml:"trigger"`
+	TriggerThreshold float32 `yaml:"trigger_threshold"`
+	NaturalAngleDeg  float64 `yaml:"natural_angle_deg"`
+	DeadzoneDPS      float64 `yaml:"deadzone_dps"`
+	SensYaw          float64 `yaml:"sens_yaw"`
+	SensPitch        float64 `yaml:"sens_pitch"`
+	InvertPitch      bool    `yaml:"invert_pitch"`
+}
+
+type AimAntiRecoilConfig struct {
+	Enabled      bool     `yaml:"enabled"`
+	Trigger      string   `yaml:"trigger"`
+	StartDelay   Duration `yaml:"start_delay"`
+	BurstForce   float64  `yaml:"burst_force"`
+	BurstDecay   float64  `yaml:"burst_decay"`
+	SustainForce float64  `yaml:"sustain_force"`
+	JitterNoise  float64  `yaml:"jitter_noise"`
+}
+
+// EffectiveAim returns the active aim configuration (Aim or AimAssist).
+func (p *Profile) EffectiveAim() *AimConfig {
+	if p.Aim != nil {
+		return p.Aim
+	}
+	return p.AimAssist
 }
 
 // Haptics configures the optional voice-coil (audio) output.
@@ -261,6 +315,37 @@ func (p *Profile) Validate() error {
 			}
 			if r.Modulate.Hz <= 0 {
 				return fmt.Errorf("profile %s: %s: modulate.hz must be > 0", p.Name, label)
+			}
+		}
+	}
+	if aim := p.EffectiveAim(); aim != nil {
+		if aim.Curve.Type != "" {
+			switch aim.Curve.Type {
+			case "linear", "power", "sigmoid", "dual_zone":
+			default:
+				return fmt.Errorf("profile %s: unknown aim curve type %q", p.Name, aim.Curve.Type)
+			}
+		}
+		if aim.Filter.Type != "" {
+			switch aim.Filter.Type {
+			case "none", "ema", "one_euro":
+			default:
+				return fmt.Errorf("profile %s: unknown aim filter type %q", p.Name, aim.Filter.Type)
+			}
+		}
+		if aim.Gyro.Enabled && aim.Gyro.Trigger != "" {
+			switch aim.Gyro.Trigger {
+			case "l2_hold", "touch", "always":
+			default:
+				return fmt.Errorf("profile %s: unknown aim gyro trigger %q", p.Name, aim.Gyro.Trigger)
+			}
+		}
+		if aim.AntiRecoil.Enabled {
+			if aim.AntiRecoil.BurstDecay < 0 {
+				return fmt.Errorf("profile %s: burst_decay must be >= 0", p.Name)
+			}
+			if aim.AntiRecoil.BurstForce < 0 {
+				return fmt.Errorf("profile %s: burst_force must be >= 0", p.Name)
 			}
 		}
 	}

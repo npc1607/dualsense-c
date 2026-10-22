@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/npc1607/dualsense-c/internal/profile"
 	"github.com/npc1607/dualsense-c/internal/vpad"
 	_ "github.com/npc1607/dualsense-c/internal/vpad/all"
 	"github.com/npc1607/dualsense-c/internal/vpad/ipc"
@@ -32,9 +33,10 @@ func main() {
 		name    = flag.String("name", "", "virtual device name (default: auto per protocol)")
 		grab    = flag.String("grab", "", "physical evdev node to grab (default: auto-detect DualSense)")
 		listen  = flag.String("listen", ipc.DefaultEndpoint, "ultra-low latency IPC endpoint for force feedback (e.g. 127.0.0.1:9998 or unix:///tmp/ds5vpad.sock)")
-		publish = flag.String("publish", "", "alias for -listen (deprecated)")
-		quiet   = flag.Bool("quiet", false, "only log errors")
-		showVer = flag.Bool("version", false, "print version and exit")
+		publish  = flag.String("publish", "", "alias for -listen (deprecated)")
+		profPath = flag.String("profile", "", "path to profile .yaml (for aim assist & curves)")
+		quiet    = flag.Bool("quiet", false, "only log errors")
+		showVer  = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
 
@@ -78,6 +80,18 @@ func main() {
 	}
 	cfg.GrabPath = *grab
 	cfg.Logger = logger
+
+	if *profPath != "" {
+		prof, err := profile.LoadFile(*profPath)
+		if err != nil {
+			logger.Fatalf("load profile %s: %v", *profPath, err)
+		}
+		cfg.Aim = prof.EffectiveAim()
+		if cfg.Aim != nil && !*quiet {
+			logger.Printf("loaded aim assist configuration from %s (curve=%s, filter=%s, gyro=%v, recoil=%v)",
+				*profPath, cfg.Aim.Curve.Type, cfg.Aim.Filter.Type, cfg.Aim.Gyro.Enabled, cfg.Aim.AntiRecoil.Enabled)
+		}
+	}
 
 	// Broadcast rumble events immediately (< 50 microseconds) with zero ticker delay
 	sink := func(r vpad.Rumble) {

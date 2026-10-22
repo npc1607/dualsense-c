@@ -69,3 +69,44 @@ func TestProfile_TargetSpeakAndRadioValidation(t *testing.T) {
 		t.Fatal("expected speak rule missing clip/effect/value to fail validation")
 	}
 }
+
+func TestProfile_AimValidation(t *testing.T) {
+	fps, err := LoadFile("../../profiles/fps-aim.yaml")
+	if err != nil {
+		t.Fatalf("LoadFile fps-aim.yaml failed: %v", err)
+	}
+	aim := fps.EffectiveAim()
+	if aim == nil {
+		t.Fatal("expected EffectiveAim() to be non-nil for fps-aim.yaml")
+	}
+	if aim.Curve.Type != "sigmoid" {
+		t.Fatalf("expected curve type sigmoid, got %q", aim.Curve.Type)
+	}
+	if aim.Filter.Type != "one_euro" {
+		t.Fatalf("expected filter type one_euro, got %q", aim.Filter.Type)
+	}
+	if !aim.Gyro.Enabled {
+		t.Fatal("expected gyro enabled")
+	}
+	if !aim.AntiRecoil.Enabled {
+		t.Fatal("expected anti_recoil enabled")
+	}
+
+	// Invalid curve type
+	fps.Aim = &AimConfig{Curve: AimCurveConfig{Type: "invalid_curve"}}
+	if err := fps.Validate(); err == nil {
+		t.Fatal("expected error for invalid curve type")
+	}
+
+	// Invalid filter type
+	fps.Aim = &AimConfig{Filter: AimFilterConfig{Type: "invalid_filter"}}
+	if err := fps.Validate(); err == nil {
+		t.Fatal("expected error for invalid filter type")
+	}
+
+	// Invalid gyro trigger
+	fps.Aim = &AimConfig{Gyro: AimGyroConfig{Enabled: true, Trigger: "invalid_trigger"}}
+	if err := fps.Validate(); err == nil {
+		t.Fatal("expected error for invalid gyro trigger")
+	}
+}

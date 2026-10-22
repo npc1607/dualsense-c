@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/npc1607/dualsense-c/internal/aim"
 	"github.com/npc1607/dualsense-c/internal/device"
 	"github.com/npc1607/dualsense-c/internal/input"
 	"github.com/npc1607/dualsense-c/internal/vpad"
@@ -85,12 +86,13 @@ func vigemErr(op string, code uintptr) error {
 }
 
 type winPad struct {
-	cfg    vpad.Config
-	name   string
-	client uintptr
-	target uintptr
-	sink   vpad.RumbleSink
-	log    func(format string, args ...any)
+	cfg     vpad.Config
+	name    string
+	client  uintptr
+	target  uintptr
+	sink    vpad.RumbleSink
+	log     func(format string, args ...any)
+	aimProc *aim.Processor
 
 	mu     sync.Mutex
 	closed bool
@@ -145,11 +147,12 @@ func Open(cfg vpad.Config, sink vpad.RumbleSink) (vpad.Pad, error) {
 	}
 
 	p := &winPad{
-		cfg:    cfg,
-		name:   cfg.Name,
-		client: client,
-		target: target,
-		sink:   sink,
+		cfg:     cfg,
+		name:    cfg.Name,
+		client:  client,
+		target:  target,
+		sink:    sink,
+		aimProc: vpad.NewAimProcessor(cfg.Aim),
 	}
 	if cfg.Logger != nil {
 		p.log = cfg.Logger.Printf
@@ -214,6 +217,21 @@ func (p *winPad) Run(ctx context.Context) error {
 		st, ok := input.Parse(buf[:n])
 		if !ok {
 			continue
+		}
+		if p.aimProc != nil {
+			outRX, outRY := p.aimProc.Process(aim.InputFrame{
+				RX:          st.RX,
+				RY:          st.RY,
+				GyroYaw:     st.GyroY,
+				GyroPitch:   st.GyroX,
+				GyroRoll:    st.GyroZ,
+				L2:          st.L2,
+				R2:          st.R2,
+				TouchActive: st.TouchActive,
+				At:          time.Now(),
+			})
+			st.RX = outRX
+			st.RY = outRY
 		}
 		rep := encodeDS4Report(st, p.cfg.Deadzone)
 		if err := p.updateReport(rep); err != nil {

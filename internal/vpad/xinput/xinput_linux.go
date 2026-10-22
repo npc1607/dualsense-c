@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/npc1607/dualsense-c/internal/aim"
 	"github.com/npc1607/dualsense-c/internal/vpad"
 )
 
@@ -41,12 +42,19 @@ const (
 )
 
 type pad struct {
-	cfg    vpad.Config
-	ufd    int
-	evPath string
-	name   string
-	sink   vpad.RumbleSink
-	log    func(format string, args ...any)
+	cfg     vpad.Config
+	ufd     int
+	evPath  string
+	name    string
+	sink    vpad.RumbleSink
+	log     func(format string, args ...any)
+	aimProc *aim.Processor
+	curRX   int32
+	curRY   int32
+	curL2   int32
+	curR2   int32
+	hasRX   bool
+	hasRY   bool
 
 	mu     sync.Mutex
 	closed bool
@@ -126,7 +134,16 @@ func Open(cfg vpad.Config, sink vpad.RumbleSink) (vpad.Pad, error) {
 		return nil, err
 	}
 	ok = true
-	p := &pad{cfg: cfg, ufd: ufd, evPath: evPath, name: cfg.Name, sink: sink}
+	p := &pad{
+		cfg:     cfg,
+		ufd:     ufd,
+		evPath:  evPath,
+		name:    cfg.Name,
+		sink:    sink,
+		aimProc: vpad.NewAimProcessor(cfg.Aim),
+		curRX:   128,
+		curRY:   128,
+	}
 	if cfg.Logger != nil {
 		p.log = cfg.Logger.Printf
 	}
@@ -256,13 +273,56 @@ func (p *pad) translate(buf []byte) []byte {
 
 		switch typ {
 		case vpad.EvSyn:
+			if p.aimProc != nil && (p.hasRX || p.hasRY) {
+				normRX := float32(p.curRX-128) / 127.5
+				normRY := float32(p.curRY-128) / 127.5
+				normL2 := float32(p.curL2) / 255.0
+				normR2 := float32(p.curR2) / 255.0
+				outRX, outRY := p.aimProc.Process(aim.InputFrame{
+					RX: normRX,
+					RY: normRY,
+					L2: normL2,
+					R2: normR2,
+					At: time.Now(),
+				})
+				finalRX := int32(outRX * 32767)
+				finalRY := int32(outRY * 32767)
+				out = vpad.AppendEvent(out, vpad.EvAbs, vpad.AbsRX, finalRX)
+				out = vpad.AppendEvent(out, vpad.EvAbs, vpad.AbsRY, finalRY)
+				p.hasRX = false
+				p.hasRY = false
+			}
 			out = vpad.AppendEvent(out, vpad.EvSyn, 0, 0)
 		case vpad.EvAbs:
 			if mapped, ok := mapAbs(code); ok {
-				if code == vpad.AbsX || code == vpad.AbsY || code == vpad.AbsRX || code == vpad.AbsRY {
+				if code == vpad.AbsZ {
+					p.curL2 = val
+					out = vpad.AppendEvent(out, vpad.EvAbs, mapped, val)
+				} else if code == vpad.AbsRZ {
+					p.curR2 = val
+					out = vpad.AppendEvent(out, vpad.EvAbs, mapped, val)
+				} else if code == vpad.AbsRX {
+					p.curRX = val
+					if p.aimProc == nil {
+						val = vpad.ScaleStick(val)
+						out = vpad.AppendEvent(out, vpad.EvAbs, mapped, val)
+					} else {
+						p.hasRX = true
+					}
+				} else if code == vpad.AbsRY {
+					p.curRY = val
+					if p.aimProc == nil {
+						val = vpad.ScaleStick(val)
+						out = vpad.AppendEvent(out, vpad.EvAbs, mapped, val)
+					} else {
+						p.hasRY = true
+					}
+				} else if code == vpad.AbsX || code == vpad.AbsY {
 					val = vpad.ScaleStick(val)
+					out = vpad.AppendEvent(out, vpad.EvAbs, mapped, val)
+				} else {
+					out = vpad.AppendEvent(out, vpad.EvAbs, mapped, val)
 				}
-				out = vpad.AppendEvent(out, vpad.EvAbs, mapped, val)
 			}
 		case vpad.EvKey:
 			if mapped, ok := mapKey(code); ok {

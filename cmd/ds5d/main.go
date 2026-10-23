@@ -305,20 +305,7 @@ func run() error {
 				if err != nil {
 					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
 				}
-				if err := newP.Validate(); err != nil {
-					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
-				}
-				newShapers := make(map[string]sig.Shaper, len(newP.Shape))
-				for name, s := range newP.Shape {
-					newShapers[name] = sig.Shaper{
-						Deadzone: s.Deadzone,
-						Gamma:    s.Gamma,
-						SlewUp:   s.SlewUp,
-						SlewDown: s.SlewDown,
-					}
-				}
-				set.SetShapers(newShapers)
-				if err := engine.Reload(newP); err != nil {
+				if err := applyReload(set, engine, newP); err != nil {
 					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
 				}
 				setProfile(newP)
@@ -498,6 +485,38 @@ func run() error {
 		return device.Open(info)
 	})
 	return s.Run(ctx, produce)
+}
+
+// applyReload swaps the shaping curve and the compiled rule set atomically.
+//
+// Ordering carries the whole guarantee: Engine.Reload validates the profile,
+// compiles every rule into a temporary engine and only then takes e.mu and
+// replaces e.p / e.rules, so a compile or validate failure leaves the engine
+// untouched. Shapers are published only after that, which means a failure can
+// never leave "new shaping + old rules" behind - the half-updated state this
+// daemon used to enter when SetShapers ran first.
+//
+// Live Set entries keep the shaped values computed under the old curve; the new
+// shapers apply from the next source frame, so nothing is retroactively
+// reshaped.
+func applyReload(set *sig.Set, engine *rules.Engine, newP *profile.Profile) error {
+	if err := newP.Validate(); err != nil {
+		return err
+	}
+	if err := engine.Reload(newP); err != nil {
+		return err
+	}
+	shapers := make(map[string]sig.Shaper, len(newP.Shape))
+	for name, s := range newP.Shape {
+		shapers[name] = sig.Shaper{
+			Deadzone: s.Deadzone,
+			Gamma:    s.Gamma,
+			SlewUp:   s.SlewUp,
+			SlewDown: s.SlewDown,
+		}
+	}
+	set.SetShapers(shapers)
+	return nil
 }
 
 // shapeFieldPatch uses pointers so we can distinguish an omitted field from an

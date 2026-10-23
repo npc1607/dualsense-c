@@ -2,12 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"log"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/npc1607/dualsense-c/internal/profile"
+	"github.com/npc1607/dualsense-c/internal/rules"
 	sig "github.com/npc1607/dualsense-c/internal/signal"
 )
 
@@ -244,5 +248,172 @@ func TestProfileAccessorsAreRaceFree(t *testing.T) {
 			}
 		}()
 	}
+	wg.Wait()
+}
+
+// --- profile.reload atomicity ---------------------------------------------
+
+func newReloadProfile(name string, shape sig.Shaper, rules ...profile.Rule) *profile.Profile {
+	return &profile.Profile{
+		Name:   name,
+		Source: profile.Source{Type: "sim"},
+		Shape:  map[string]profile.Shape{"l2": {Deadzone: shape.Deadzone, Gamma: shape.Gamma, SlewUp: shape.SlewUp, SlewDown: shape.SlewDown}},
+		Rules:  rules,
+	}
+}
+
+func goodRule(name, value string) profile.Rule {
+	return profile.Rule{Name: name, Target: "l2", Effect: "rigid", Value: value,
+		Params: map[string]string{"start": "0", "force": "100"}}
+}
+
+func newReloadEngine(t *testing.T, p *profile.Profile) (*sig.Set, *rules.Engine) {
+	t.Helper()
+	if err := p.Validate(); err != nil {
+		t.Fatalf("fixture profile invalid: %v", err)
+	}
+	set := sig.NewSet(map[string]sig.Shaper{"l2": {Deadzone: p.Shape["l2"].Deadzone}})
+	eng, err := rules.New(p, set, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatalf("rules.New: %v", err)
+	}
+	return set, eng
+}
+
+func ruleNames(telem []rules.RuleTelemetry) []string {
+	out := make([]string, len(telem))
+	for i, r := range telem {
+		out[i] = r.Name
+	}
+	return out
+}
+
+// TestApplyReload_SuccessSwapsBoth covers the happy path: shaping and rules
+// both come from the new profile.
+func TestApplyReload_SuccessSwapsBoth(t *testing.T) {
+	old := newReloadProfile("old", sig.Shaper{Deadzone: 0.05}, goodRule("old-rule", "100"))
+	set, eng := newReloadEngine(t, old)
+
+	next := newReloadProfile("next", sig.Shaper{Deadzone: 0.42}, goodRule("new-rule", "200"))
+	if err := applyReload(set, eng, next); err != nil {
+		t.Fatalf("applyReload: %v", err)
+	}
+
+	if sh, _ := set.GetShaper("l2"); sh.Deadzone != 0.42 {
+		t.Fatalf("shaper = %v, want 0.42", sh.Deadzone)
+	}
+	if got := ruleNames(eng.Telemetry(time.Now())); !reflect.DeepEqual(got, []string{"new-rule"}) {
+		t.Fatalf("rules = %v, want [new-rule]", got)
+	}
+}
+
+// TestApplyReload_CompileFailureChangesNothing is the regression test for the
+// half-updated state: a rule that fails to compile must leave shaping, rules and
+// ids exactly as they were.
+func TestApplyReload_CompileFailureChangesNothing(t *testing.T) {
+	old := newReloadProfile("old", sig.Shaper{Deadzone: 0.05}, goodRule("old-rule", "100"))
+	set, eng := newReloadEngine(t, old)
+	before := eng.Telemetry(time.Now())
+
+	broken := goodRule("broken-rule", "100")
+	broken.When = "l2 >" // parse error
+	next := newReloadProfile("next", sig.Shaper{Deadzone: 0.9}, goodRule("new-rule", "200"), broken)
+
+	if err := applyReload(set, eng, next); err == nil {
+		t.Fatal("applyReload succeeded, want compile error")
+	}
+	if sh, _ := set.GetShaper("l2"); sh.Deadzone != 0.05 {
+		t.Fatalf("shaper leaked from the failed reload: %v, want 0.05", sh.Deadzone)
+	}
+	if after := eng.Telemetry(time.Now()); !reflect.DeepEqual(before, after) {
+		t.Fatalf("rules changed on failed reload:\nbefore %v\nafter  %v", before, after)
+	}
+}
+
+// TestApplyReload_ValidateFailureChangesNothing covers a profile that fails
+// Validate (duplicate rule names since a18d2aa).
+func TestApplyReload_ValidateFailureChangesNothing(t *testing.T) {
+	old := newReloadProfile("old", sig.Shaper{Deadzone: 0.05}, goodRule("old-rule", "100"))
+	set, eng := newReloadEngine(t, old)
+	before := eng.Telemetry(time.Now())
+
+	next := newReloadProfile("dup", sig.Shaper{Deadzone: 0.9},
+		goodRule("dup", "100"), goodRule("dup", "200"))
+
+	if err := applyReload(set, eng, next); err == nil {
+		t.Fatal("applyReload succeeded, want validate error")
+	}
+	if sh, _ := set.GetShaper("l2"); sh.Deadzone != 0.05 {
+		t.Fatalf("shaper leaked from the failed reload: %v", sh.Deadzone)
+	}
+	if after := eng.Telemetry(time.Now()); !reflect.DeepEqual(before, after) {
+		t.Fatalf("rules changed on failed reload:\nbefore %v\nafter  %v", before, after)
+	}
+}
+
+// TestApplyReload_RecoversAfterFailure proves a failed reload leaves no sticky
+// state: the next healthy reload applies normally.
+func TestApplyReload_RecoversAfterFailure(t *testing.T) {
+	old := newReloadProfile("old", sig.Shaper{Deadzone: 0.05}, goodRule("old-rule", "100"))
+	set, eng := newReloadEngine(t, old)
+
+	broken := goodRule("broken-rule", "100")
+	broken.When = "l2 >"
+	if err := applyReload(set, eng, newReloadProfile("bad", sig.Shaper{Deadzone: 0.9}, broken)); err == nil {
+		t.Fatal("expected failure")
+	}
+
+	good := newReloadProfile("good", sig.Shaper{Deadzone: 0.33}, goodRule("ok-rule", "150"))
+	if err := applyReload(set, eng, good); err != nil {
+		t.Fatalf("follow-up reload failed: %v", err)
+	}
+	if sh, _ := set.GetShaper("l2"); sh.Deadzone != 0.33 {
+		t.Fatalf("shaper = %v, want 0.33", sh.Deadzone)
+	}
+	if got := ruleNames(eng.Telemetry(time.Now())); !reflect.DeepEqual(got, []string{"ok-rule"}) {
+		t.Fatalf("rules = %v, want [ok-rule]", got)
+	}
+}
+
+// TestApplyReload_ConcurrentReads runs reloads (failing and succeeding) while
+// readers sample shapers and rule telemetry; meaningful under -race.
+func TestApplyReload_ConcurrentReads(t *testing.T) {
+	old := newReloadProfile("old", sig.Shaper{Deadzone: 0.05}, goodRule("old-rule", "100"))
+	set, eng := newReloadEngine(t, old)
+
+	broken := goodRule("broken-rule", "100")
+	broken.When = "l2 >"
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_ = applyReload(set, eng, newReloadProfile("n", sig.Shaper{Deadzone: 0.2}, goodRule("r", "100")))
+				_ = applyReload(set, eng, newReloadProfile("b", sig.Shaper{Deadzone: 0.9}, broken))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_, _ = set.GetShaper("l2")
+				_ = eng.Telemetry(time.Now())
+			}
+		}()
+	}
+	time.Sleep(150 * time.Millisecond)
+	close(stop)
 	wg.Wait()
 }

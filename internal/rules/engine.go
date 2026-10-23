@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/ast"
+	"github.com/expr-lang/expr/parser"
 	"github.com/expr-lang/expr/vm"
 
 	"github.com/npc1607/dualsense-c/internal/hid"
@@ -85,6 +87,13 @@ type rule struct {
 	text      string
 	wasActive bool
 	lastState uint8
+	// refs is the set of signal identifiers referenced by this rule's when /
+	// value / params expressions. When the whole expression evaluates to false,
+	// any missing ref means the decision is STALE, not FALSE. This is a
+	// whole-expression classification: individual AST nodes are not evaluated
+	// (see the S4 Inspector follow-up), so a rule with `brake > 0.2 && has(speed)`
+	// reports STALE even though the brake branch could be decided on its own.
+	refs []string
 }
 
 // Engine turns the current signal values into one controller frame.
@@ -270,6 +279,7 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 		modulate: pr.Modulate,
 		hold:     pr.Hold.Duration(),
 	}
+	var sources []string // expressions whose signal refs belong to this rule
 	if pr.Effect != "" && r.target != targetSpeak && r.target != targetRadio {
 		mode, ok := hid.ParseMode(pr.Effect)
 		if !ok {
@@ -284,6 +294,7 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 			return fail(fmt.Errorf("when: %w", err))
 		}
 		r.when = prog
+		sources = append(sources, pr.When)
 	}
 
 	switch r.target {
@@ -298,6 +309,7 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 				return fail(fmt.Errorf("params.%s: %w", name, err))
 			}
 			r.params[idx] = prog
+			sources = append(sources, src)
 		}
 	case targetRumbleLeft, targetRumbleRight, targetHapticLeft, targetHapticRight,
 		targetPlayerLEDs, targetMuteLED:
@@ -306,6 +318,7 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 			return fail(fmt.Errorf("value: %w", err))
 		}
 		r.value = prog
+		sources = append(sources, pr.Value)
 	case targetLightbar:
 		for i, k := range []string{"r", "g", "b"} {
 			prog, err := e.compile(pr.Params[k])
@@ -313,6 +326,7 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 				return fail(fmt.Errorf("params.%s: %w", k, err))
 			}
 			r.rgb[i] = prog
+			sources = append(sources, pr.Params[k])
 		}
 	case targetSpeak, targetRadio:
 		clip := pr.Clip
@@ -326,7 +340,61 @@ func (e *Engine) compileRule(pr profile.Rule, idx int) (*rule, error) {
 		r.cooldown = pr.Cooldown.Duration()
 		r.text = pr.Text
 	}
+	refs, err := e.signalRefs(sources)
+	if err != nil {
+		return fail(err)
+	}
+	r.refs = refs
 	return r, nil
+}
+
+// signalRefs parses the rule's expressions and returns every identifier that
+// names a signal (standard vocabulary or a profile-declared extension). Helper
+// functions such as pressed/has/clamp are filtered out because they are not in
+// the signal vocabulary.
+func (e *Engine) signalRefs(sources []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(sources))
+	for _, src := range sources {
+		if src == "" {
+			continue
+		}
+		tree, err := parser.Parse(src)
+		if err != nil {
+			return nil, fmt.Errorf("parse refs: %w", err)
+		}
+		ast.Walk(&tree.Node, refVisitor{e: e, seen: seen})
+	}
+	if len(seen) == 0 {
+		return nil, nil
+	}
+	refs := make([]string, 0, len(seen))
+	for name := range seen {
+		refs = append(refs, name)
+	}
+	slices.Sort(refs)
+	return refs, nil
+}
+
+type refVisitor struct {
+	e    *Engine
+	seen map[string]struct{}
+}
+
+func (v refVisitor) Visit(node *ast.Node) {
+	id, ok := (*node).(*ast.IdentifierNode)
+	if !ok {
+		return
+	}
+	if v.e.isSignal(id.Value) {
+		v.seen[id.Value] = struct{}{}
+	}
+}
+
+// isSignal reports whether name is bound as a signal rather than a helper
+// function. signal.Standard is append-only and profiles may add names via
+// `signals:`.
+func (e *Engine) isSignal(name string) bool {
+	return signal.IsStandard(name) || slices.Contains(e.p.Extra, name)
 }
 
 func (e *Engine) compile(src string) (*vm.Program, error) {
@@ -456,7 +524,28 @@ func (e *Engine) active(r *rule) bool {
 		r.lastState = RuleStateHold
 		return true
 	}
+	// A false `when` has two very different causes: the referenced signals are
+	// fresh and genuinely do not match (FALSE), or at least one of them is
+	// absent/expired (STALE). The UI must be able to tell these apart. The hold
+	// latch above still wins while it is active, since the effect is visibly
+	// latched even if the source just went stale.
+	if e.anyRefStale(r) {
+		r.lastState = RuleStateStale
+		return false
+	}
 	r.lastState = RuleStateFalse
+	return false
+}
+
+// anyRefStale reports whether at least one signal referenced by the rule is
+// missing from the current fresh snapshot. e.fresh is rebuilt by Step before
+// any rule is evaluated.
+func (e *Engine) anyRefStale(r *rule) bool {
+	for _, name := range r.refs {
+		if !e.fresh[name] {
+			return true
+		}
+	}
 	return false
 }
 

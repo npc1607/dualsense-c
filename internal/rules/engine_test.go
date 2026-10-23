@@ -566,14 +566,15 @@ func TestEngine_TelemetryReloadAndSimulate(t *testing.T) {
 	}
 
 	t0 := time.Now()
-	// Step 1: throttle = 0 (r1 should be false, r2 should be true)
+	// Step 1: throttle has never arrived, so r1 references a stale signal and
+	// must be STALE (3), not FALSE (2). r2_unconditional has no `when`.
 	_ = eng.Step(t0)
 	telem := eng.Telemetry(t0)
 	if len(telem) != 2 {
 		t.Fatalf("expected 2 telemetry rules, got %d", len(telem))
 	}
-	if telem[0].State != RuleStateFalse {
-		t.Fatalf("expected r1 to be FALSE, got %d", telem[0].State)
+	if telem[0].State != RuleStateStale {
+		t.Fatalf("expected r1 to be STALE before throttle arrives, got %d", telem[0].State)
 	}
 	if telem[1].State != RuleStateTrue {
 		t.Fatalf("expected r2_unconditional to be TRUE, got %d", telem[1].State)
@@ -643,5 +644,125 @@ func TestEngine_TelemetryReloadAndSimulate(t *testing.T) {
 	}
 	if simFrame.R2.Mode != hid.ModeRigid {
 		t.Fatalf("expected simulated R2 mode Rigid, got %v", simFrame.R2.Mode)
+	}
+}
+
+// TestRuleStateStaleVsFalse covers the core S4 requirement: a false `when` is
+// reported as STALE when any referenced signal is absent/expired, and as FALSE
+// only when every referenced signal is fresh.
+func TestRuleStateStaleVsFalse(t *testing.T) {
+	const ruleName = "speed-gate"
+	newEngine := func(t *testing.T, when string) *Engine {
+		t.Helper()
+		p := &profile.Profile{
+			Name:   "stale-test",
+			Source: profile.Source{Type: "sim"},
+			Rules: []profile.Rule{{
+				Name:   ruleName,
+				When:   when,
+				Target: "rumble_left",
+				Value:  "100",
+			}},
+		}
+		return mustEngine(t, p, signal.NewSet(nil))
+	}
+
+	t.Run("referenced signal stale", func(t *testing.T) {
+		e := newEngine(t, "speed > 0.5")
+		base := time.Now()
+		e.Step(base) // speed never arrived
+		telem := e.Telemetry(base)
+		if telem[0].State != RuleStateStale {
+			t.Fatalf("state = %d, want STALE (%d)", telem[0].State, RuleStateStale)
+		}
+	})
+
+	t.Run("referenced signal fresh but false", func(t *testing.T) {
+		set := signal.NewSet(nil)
+		p := &profile.Profile{
+			Name:   "stale-test",
+			Source: profile.Source{Type: "sim"},
+			Rules: []profile.Rule{{
+				Name: ruleName, When: "speed > 0.5", Target: "rumble_left", Value: "100",
+			}},
+		}
+		e := mustEngine(t, p, set)
+		base := time.Now()
+		apply(set, base, map[string]float32{"speed": 0.1})
+		e.Step(base.Add(time.Millisecond))
+		telem := e.Telemetry(base.Add(time.Millisecond))
+		if telem[0].State != RuleStateFalse {
+			t.Fatalf("state = %d, want FALSE (%d)", telem[0].State, RuleStateFalse)
+		}
+	})
+
+	t.Run("no when", func(t *testing.T) {
+		e := newEngine(t, "")
+		base := time.Now()
+		e.Step(base)
+		telem := e.Telemetry(base)
+		if telem[0].State != RuleStateTrue {
+			t.Fatalf("state = %d, want TRUE (%d)", telem[0].State, RuleStateTrue)
+		}
+	})
+
+	t.Run("one of two referenced signals stale", func(t *testing.T) {
+		set := signal.NewSet(nil)
+		p := &profile.Profile{
+			Name:   "stale-test",
+			Source: profile.Source{Type: "sim"},
+			Rules: []profile.Rule{{
+				Name: ruleName, When: "speed > 0.5 && rpm > 100", Target: "rumble_left", Value: "100",
+			}},
+		}
+		e := mustEngine(t, p, set)
+		base := time.Now()
+		apply(set, base, map[string]float32{"speed": 0.1}) // rpm absent
+		e.Step(base.Add(time.Millisecond))
+		telem := e.Telemetry(base.Add(time.Millisecond))
+		if telem[0].State != RuleStateStale {
+			t.Fatalf("state = %d, want STALE (%d) when only one ref is fresh", telem[0].State, RuleStateStale)
+		}
+
+		// Both fresh and both branches false -> FALSE.
+		apply(set, base.Add(2*time.Millisecond), map[string]float32{"rpm": 50})
+		e.Step(base.Add(3 * time.Millisecond))
+		telem = e.Telemetry(base.Add(3 * time.Millisecond))
+		if telem[0].State != RuleStateFalse {
+			t.Fatalf("state = %d, want FALSE (%d) after both refs become fresh", telem[0].State, RuleStateFalse)
+		}
+	})
+
+	t.Run("profile extension signal is tracked", func(t *testing.T) {
+		set := signal.NewSet(nil)
+		p := &profile.Profile{
+			Name:   "stale-test",
+			Source: profile.Source{Type: "sim"},
+			Extra:  []string{"my_signal"},
+			Rules: []profile.Rule{{
+				Name: ruleName, When: "my_signal > 0.5", Target: "rumble_left", Value: "100",
+			}},
+		}
+		e := mustEngine(t, p, set)
+		base := time.Now()
+		e.Step(base)
+		telem := e.Telemetry(base)
+		if telem[0].State != RuleStateStale {
+			t.Fatalf("state = %d, want STALE (%d) for absent profile extension signal", telem[0].State, RuleStateStale)
+		}
+	})
+}
+
+// TestSignalRefsIgnoresHelpers makes sure collecting refs only keeps signal
+// identifiers: `pressed`, `has`, `clamp`, `round`, etc. must not be treated as
+// signals (and string arguments to has() are not identifiers at all).
+func TestSignalRefsIgnoresHelpers(t *testing.T) {
+	e := mustEngine(t, &profile.Profile{Name: "t", Source: profile.Source{Type: "sim"}}, signal.NewSet(nil))
+	refs, err := e.signalRefs([]string{`pressed("r2") && clamp(speed, 0, 255) > 1 && has("rpm")`})
+	if err != nil {
+		t.Fatalf("signalRefs: %v", err)
+	}
+	if len(refs) != 1 || refs[0] != "speed" {
+		t.Fatalf("refs = %v, want [speed]", refs)
 	}
 }

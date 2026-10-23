@@ -100,16 +100,21 @@ func cmdProfiles(args []string) error {
 	fs := flag.NewFlagSet("profiles", flag.ExitOnError)
 	dir := fs.String("dir", "", "also list profiles in this directory")
 	jsonOut := fs.Bool("json", false, "output JSON format")
+	strict := fs.Bool("strict-profile", true, "reject unknown keys in profile YAML (false restores legacy silent-drop decoding)")
 	_ = fs.Parse(args)
+	opts := profile.DecodeOptions{Lenient: !*strict}
+	if !*strict {
+		fmt.Fprintln(os.Stderr, "warning: -strict-profile=false: unknown profile keys are ignored (legacy behaviour)")
+	}
 
-	builtin, err := profile.Builtin()
+	builtin, err := profile.Builtin(opts)
 	if err != nil {
 		return err
 	}
 
 	var custom []*profile.Profile
 	if *dir != "" {
-		c, err := profile.Dir(*dir)
+		c, err := profile.Dir(*dir, opts)
 		if err != nil {
 			return err
 		}
@@ -153,9 +158,14 @@ func cmdCheck(args []string) error {
 	name := fs.String("profile", "fps", "profile name or path")
 	dir := fs.String("profiles", "", "profile directory")
 	jsonOut := fs.Bool("json", false, "output JSON format")
+	strict := fs.Bool("strict-profile", true, "reject unknown keys in profile YAML (false restores legacy silent-drop decoding)")
 	_ = fs.Parse(args)
+	opts := profile.DecodeOptions{Lenient: !*strict}
+	if !*strict {
+		fmt.Fprintln(os.Stderr, "warning: -strict-profile=false: unknown profile keys are ignored (legacy behaviour)")
+	}
 
-	p, err := profile.Resolve(*name, *dir)
+	p, err := profile.Resolve(*name, *dir, opts)
 	if err != nil {
 		return err
 	}

@@ -1,12 +1,15 @@
 package profile
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestProfile_Builtins(t *testing.T) {
-	builtins, err := Builtin()
+	builtins, err := Builtin(DecodeOptions{})
 	if err != nil {
 		t.Fatalf("Builtin() failed: %v", err)
 	}
@@ -75,7 +78,7 @@ func TestProfile_AllowsAnonymousRules(t *testing.T) {
 }
 
 func TestProfile_SampleProfilesValidate(t *testing.T) {
-	profs, err := Dir("../../profiles")
+	profs, err := Dir("../../profiles", DecodeOptions{})
 	if err != nil {
 		t.Fatalf("Dir(../../profiles) failed: %v", err)
 	}
@@ -128,7 +131,7 @@ func TestProfile_TargetSpeakAndRadioValidation(t *testing.T) {
 }
 
 func TestProfile_AimValidation(t *testing.T) {
-	fps, err := LoadFile("../../profiles/fps-aim.yaml")
+	fps, err := LoadFile("../../profiles/fps-aim.yaml", DecodeOptions{})
 	if err != nil {
 		t.Fatalf("LoadFile fps-aim.yaml failed: %v", err)
 	}
@@ -165,5 +168,103 @@ func TestProfile_AimValidation(t *testing.T) {
 	fps.Aim = &AimConfig{Gyro: AimGyroConfig{Enabled: true, Trigger: "invalid_trigger"}}
 	if err := fps.Validate(); err == nil {
 		t.Fatal("expected error for invalid gyro trigger")
+	}
+}
+
+// writeProfile drops a YAML fixture into a temp dir and returns its path.
+func writeProfile(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "profile.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return path
+}
+
+func TestStrictDecodeRejectsUnknownKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "unknown top-level key",
+			body: "name: strict\nsource:\n  type: sim\nbogus_top: 1\n",
+			want: "bogus_top",
+		},
+		{
+			name: "unknown rule key",
+			body: `name: strict
+source:
+  type: sim
+rules:
+  - name: r
+    target: rumble_left
+    value: "1"
+    bogus_rule: 1
+`,
+			want: "bogus_rule",
+		},
+		{
+			name: "unknown nested aim key",
+			body: `name: strict
+source:
+  type: sim
+aim:
+  curve:
+    bogus_curve: 1
+`,
+			want: "bogus_curve",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeProfile(t, tc.body)
+			if _, err := LoadFile(path, DecodeOptions{}); err == nil {
+				t.Fatalf("strict LoadFile accepted unknown key %q", tc.want)
+			} else if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not name the unknown key %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestStrictDecodeAllowsSourceParams documents the deliberate boundary: strict
+// mode covers top-level and rule keys, while Source.Params is an inline open
+// map that each source adapter validates.
+func TestStrictDecodeAllowsSourceParams(t *testing.T) {
+	path := writeProfile(t, `name: open-source
+source:
+  type: sim
+  brand_new_key: 42
+`)
+	p, err := LoadFile(path, DecodeOptions{})
+	if err != nil {
+		t.Fatalf("unknown source parameter must not fail strict decoding: %v", err)
+	}
+	if got := fmt.Sprint(p.Source.Params["brand_new_key"]); got != "42" {
+		t.Fatalf("Source.Params[brand_new_key] = %q, want 42", got)
+	}
+}
+
+func TestLenientDecodeKeepsLegacyBehaviour(t *testing.T) {
+	path := writeProfile(t, "name: legacy\nsource:\n  type: sim\nbogus_top: 1\n")
+	p, err := LoadFile(path, DecodeOptions{Lenient: true})
+	if err != nil {
+		t.Fatalf("lenient LoadFile rejected an unknown key: %v", err)
+	}
+	if p.Name != "legacy" {
+		t.Fatalf("name = %q, want legacy", p.Name)
+	}
+}
+
+// TestAllShippedProfilesDecodeStrictly is the regression gate for the escape
+// hatch: builtins and samples must not rely on unknown-key tolerance.
+func TestAllShippedProfilesDecodeStrictly(t *testing.T) {
+	if _, err := Builtin(DecodeOptions{}); err != nil {
+		t.Fatalf("strict decoding of builtin profiles failed: %v", err)
+	}
+	if _, err := Dir("../../profiles", DecodeOptions{}); err != nil {
+		t.Fatalf("strict decoding of sample profiles failed: %v", err)
 	}
 }

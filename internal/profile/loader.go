@@ -6,22 +6,20 @@ import (
 	"path"
 	"sort"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed builtin/*.yaml
 var builtinFS embed.FS
 
 // builtin loads a profile embedded in the binary.
-func builtin(name string) (*Profile, error) {
+func builtin(name string, opts ...DecodeOptions) (*Profile, error) {
 	raw, err := builtinFS.ReadFile(path.Join("builtin", name+".yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("profile: builtin %q not found", name)
 	}
-	var p Profile
-	if err := yaml.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("profile %s: %w", name, err)
+	p, err := decodeProfile(raw, name, firstDecodeOptions(opts))
+	if err != nil {
+		return nil, err
 	}
 	if p.Name == "" {
 		p.Name = name
@@ -29,7 +27,7 @@ func builtin(name string) (*Profile, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	return &p, nil
+	return p, nil
 }
 
 // BuiltinNames lists embedded profile names.
@@ -49,10 +47,10 @@ func BuiltinNames() []string {
 }
 
 // Builtin returns all embedded profiles.
-func Builtin() ([]*Profile, error) {
+func Builtin(opts ...DecodeOptions) ([]*Profile, error) {
 	var out []*Profile
 	for _, name := range BuiltinNames() {
-		p, err := builtin(name)
+		p, err := builtin(name, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -62,14 +60,14 @@ func Builtin() ([]*Profile, error) {
 }
 
 // Resolve finds a profile by name: a path, a file in dir, or a builtin.
-func Resolve(nameOrPath, dir string) (*Profile, error) {
+func Resolve(nameOrPath, dir string, opts ...DecodeOptions) (*Profile, error) {
 	if strings.ContainsAny(nameOrPath, `/\`) || strings.HasSuffix(nameOrPath, ".yaml") {
-		return LoadFile(nameOrPath)
+		return LoadFile(nameOrPath, opts...)
 	}
 	if dir != "" {
-		if p, err := LoadFile(fmt.Sprintf("%s/%s.yaml", dir, nameOrPath)); err == nil {
+		if p, err := LoadFile(fmt.Sprintf("%s/%s.yaml", dir, nameOrPath), opts...); err == nil {
 			return p, nil
 		}
 	}
-	return builtin(nameOrPath)
+	return builtin(nameOrPath, opts...)
 }

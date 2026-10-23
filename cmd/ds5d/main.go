@@ -113,16 +113,17 @@ func main() {
 
 func run() error {
 	var (
-		profileName  = flag.String("profile", "fps", "profile name (builtin) or path to a .yaml file")
-		profilesDir  = flag.String("profiles", "", "extra directory to look up profiles in")
-		hidrawPath   = flag.String("hidraw", "", "force a device path (default: auto-detect)")
-		rate         = flag.Int("rate", 125, "output reports per second")
-		sourceType   = flag.String("source", "", "override the profile's source type (e.g. sim)")
-		dryRun       = flag.Bool("dry-run", false, "do not open a controller; print frames instead")
-		trace        = flag.Bool("trace", false, "log signal values twice per second")
-		list         = flag.Bool("list", false, "list profiles and exit")
-		ipcBroadcast = flag.String("ipc-broadcast", "127.0.0.1:9997", "IPC telemetry broadcast endpoint (empty to disable)")
-		showVer      = flag.Bool("version", false, "print version and exit")
+		profileName   = flag.String("profile", "fps", "profile name (builtin) or path to a .yaml file")
+		profilesDir   = flag.String("profiles", "", "extra directory to look up profiles in")
+		hidrawPath    = flag.String("hidraw", "", "force a device path (default: auto-detect)")
+		rate          = flag.Int("rate", 125, "output reports per second")
+		sourceType    = flag.String("source", "", "override the profile's source type (e.g. sim)")
+		dryRun        = flag.Bool("dry-run", false, "do not open a controller; print frames instead")
+		strictProfile = flag.Bool("strict-profile", true, "reject unknown keys in profile YAML (false restores legacy silent-drop decoding)")
+		trace         = flag.Bool("trace", false, "log signal values twice per second")
+		list          = flag.Bool("list", false, "list profiles and exit")
+		ipcBroadcast  = flag.String("ipc-broadcast", "127.0.0.1:9997", "IPC telemetry broadcast endpoint (empty to disable)")
+		showVer       = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
 
@@ -132,12 +133,16 @@ func run() error {
 	}
 
 	logger := log.New(log.Writer(), "ds5d: ", log.LstdFlags)
-
-	if *list {
-		return listProfiles(*profilesDir)
+	decodeOpts := profile.DecodeOptions{Lenient: !*strictProfile}
+	if !*strictProfile {
+		logger.Printf("warning: -strict-profile=false: unknown profile keys are ignored (legacy behaviour)")
 	}
 
-	p, err := profile.Resolve(*profileName, *profilesDir)
+	if *list {
+		return listProfiles(*profilesDir, decodeOpts)
+	}
+
+	p, err := profile.Resolve(*profileName, *profilesDir, decodeOpts)
 	if err != nil {
 		return err
 	}
@@ -377,7 +382,7 @@ func run() error {
 				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"subscribed":true}`)}
 
 			case "profile.reload":
-				newP, err := profile.Resolve(*profileName, *profilesDir)
+				newP, err := profile.Resolve(*profileName, *profilesDir, decodeOpts)
 				if err != nil {
 					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
 				}
@@ -781,8 +786,8 @@ func traceSignals(ctx context.Context, set *sig.Set, ttl func() time.Duration, l
 	}
 }
 
-func listProfiles(dir string) error {
-	builtin, err := profile.Builtin()
+func listProfiles(dir string, opts profile.DecodeOptions) error {
+	builtin, err := profile.Builtin(opts)
 	if err != nil {
 		return err
 	}
@@ -793,7 +798,7 @@ func listProfiles(dir string) error {
 	if dir == "" {
 		return nil
 	}
-	custom, err := profile.Dir(dir)
+	custom, err := profile.Dir(dir, opts)
 	if err != nil {
 		return err
 	}

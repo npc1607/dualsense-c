@@ -4,6 +4,7 @@
 package profile
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -370,15 +371,56 @@ func (p *Profile) Validate() error {
 	return nil
 }
 
+// DecodeOptions controls profile YAML decoding. The zero value is the safe
+// default: unknown keys are rejected.
+//
+// Lenient restores the legacy yaml.Unmarshal behaviour (unknown keys are
+// silently dropped). It exists only as a migration escape hatch for
+// `-strict-profile=false`, never as the default.
+//
+// Strictness covers top-level profile keys, rule keys and the nested structs
+// reachable from them. It deliberately does not cover source parameters:
+// Source.Params is `yaml:",inline"`, so an unknown source key is stored in the
+// map and validated by the source adapter that understands it.
+type DecodeOptions struct {
+	Lenient bool
+}
+
+// firstDecodeOptions applies the strict default when the variadic option is
+// omitted. Callers may pass at most one value; later values are ignored.
+func firstDecodeOptions(opts []DecodeOptions) DecodeOptions {
+	if len(opts) == 0 {
+		return DecodeOptions{}
+	}
+	return opts[0]
+}
+
+// decodeProfile decodes one YAML document using opts.
+func decodeProfile(raw []byte, what string, opts DecodeOptions) (*Profile, error) {
+	var p Profile
+	if opts.Lenient {
+		if err := yaml.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("profile %s: %w", what, err)
+		}
+		return &p, nil
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&p); err != nil {
+		return nil, fmt.Errorf("profile %s: %w", what, err)
+	}
+	return &p, nil
+}
+
 // LoadFile reads and validates a profile from disk.
-func LoadFile(path string) (*Profile, error) {
+func LoadFile(path string, opts ...DecodeOptions) (*Profile, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("profile: %w", err)
 	}
-	var p Profile
-	if err := yaml.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("profile %s: %w", path, err)
+	p, err := decodeProfile(raw, path, firstDecodeOptions(opts))
+	if err != nil {
+		return nil, err
 	}
 	if p.Name == "" {
 		p.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
@@ -386,11 +428,11 @@ func LoadFile(path string) (*Profile, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	return &p, nil
+	return p, nil
 }
 
 // Dir lists profiles in dir, sorted by name.
-func Dir(dir string) ([]*Profile, error) {
+func Dir(dir string, opts ...DecodeOptions) ([]*Profile, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -400,7 +442,7 @@ func Dir(dir string) ([]*Profile, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
 		}
-		p, err := LoadFile(filepath.Join(dir, e.Name()))
+		p, err := LoadFile(filepath.Join(dir, e.Name()), opts...)
 		if err != nil {
 			return nil, err
 		}

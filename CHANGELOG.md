@@ -36,6 +36,19 @@
 
 ## Unreleased
 
+### 破坏性变更：profile 严格解码（未知键会启动失败）
+- `profile.LoadFile` / `builtin` / `Dir` / `Resolve` 统一改为
+  `yaml.NewDecoder(...).KnownFields(true)`：未知的顶层键与 rule 键不再静默丢弃，
+  而是直接报错（错误信息会指出键名与行号）。历史上 `fps-aim.yaml` 的
+  `aim_assist` 这类死配置会在加载阶段暴露。
+- `ds5d` / `ds5ctl profiles` / `ds5ctl check` 新增 `-strict-profile`（默认 `true`）。
+  存量含未知键的第三方 profile 可临时用 `-strict-profile=false` 恢复旧的
+  `yaml.Unmarshal` 行为（会打印一条警告），随后按报错删除或补全未知键。
+- 严格范围是顶层键、rule 键及其嵌套结构（`shape` / `safety` / `haptics` /
+  `aim`）；`source` 的未知参数仍进入 `Source.Params` 开放 map，由各 source
+  适配器自行校验，这是有意保留的设计。
+- 内置 profile 与仓库内示例 profile 已在严格模式下全量通过，无需改动。
+
 ### 破坏性变更：规则名必须唯一
 - `profile.Validate()` 现在拒绝同一 profile 内的重复非空规则名，错误会同时给出两个下标
   （`profile X: duplicate rule name "foo" (rules[3] and rules[7])`）。此前重复名会静默共享

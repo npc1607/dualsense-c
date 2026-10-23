@@ -268,3 +268,33 @@ func TestAllShippedProfilesDecodeStrictly(t *testing.T) {
 		t.Fatalf("strict decoding of sample profiles failed: %v", err)
 	}
 }
+
+// TestResolveDoesNotHideStrictErrors pins the fallback rule: Resolve only falls
+// through to a builtin when the file in -profiles does not exist. A profile that
+// exists but fails strict decoding must surface the error, otherwise an unknown
+// key in the user's own profile silently resolves to the builtin of that name.
+func TestResolveDoesNotHideStrictErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fps.yaml")
+	if err := os.WriteFile(path, []byte("name: fps\nbogus: 1\nsource: {type: sim}\n"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	if _, err := Resolve("fps", dir); err == nil {
+		t.Fatal("Resolve succeeded on a profile with an unknown key, want error")
+	} else if !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("error does not name the unknown key: %v", err)
+	}
+
+	// Lenient mode keeps working on the same file.
+	if _, err := Resolve("fps", dir, DecodeOptions{Lenient: true}); err != nil {
+		t.Fatalf("lenient Resolve failed: %v", err)
+	}
+
+	// A missing file still falls through to the builtin.
+	if p, err := Resolve("fps", t.TempDir()); err != nil {
+		t.Fatalf("builtin fallback failed: %v", err)
+	} else if p.Name != "fps" {
+		t.Fatalf("fallback profile = %q, want fps", p.Name)
+	}
+}

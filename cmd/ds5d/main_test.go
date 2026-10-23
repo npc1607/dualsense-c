@@ -508,9 +508,9 @@ func TestHealthConnectedDevice(t *testing.T) {
 	}
 }
 
-// TestHealthDisconnectedAfterReopenFailure makes sure identity is omitted (but
+// TestHealthDisconnectedOmitsIdentity makes sure identity is omitted (but
 // counters remain queryable) when the sink could not reattach.
-func TestHealthDisconnectedAfterReopenFailure(t *testing.T) {
+func TestHealthDisconnectedOmitsIdentity(t *testing.T) {
 	status := &deviceStatus{
 		connected: false,
 		info:      device.Info{Path: "/dev/hidraw3", Vendor: 0x054c, Product: 0x0ce6, Transport: device.USB},
@@ -529,5 +529,18 @@ func TestHealthDisconnectedAfterReopenFailure(t *testing.T) {
 	}
 	if dev["write_errors"] != float64(4) {
 		t.Fatalf("device.write_errors = %v, want 4", dev["write_errors"])
+	}
+}
+
+// TestHealthDeviceOmitsUnprobedIdentity covers a forced -hidraw path (or a
+// platform that failed to read the descriptor): a zero VID/PID must stay empty
+// rather than being formatted as a fabricated "0000".
+func TestHealthDeviceOmitsUnprobedIdentity(t *testing.T) {
+	d := newHealthDevice(&deviceStatus{connected: true, info: device.Info{Path: "/dev/hidraw9"}}, sink.Stats{})
+	if !d.Connected {
+		t.Fatal("connected = false, want true")
+	}
+	if d.VendorID != "" || d.ProductID != "" {
+		t.Fatalf("identity = %q/%q, want both empty", d.VendorID, d.ProductID)
 	}
 }

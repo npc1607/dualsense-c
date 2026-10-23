@@ -2,7 +2,9 @@ package profile
 
 import (
 	"embed"
+	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"sort"
 	"strings"
@@ -65,8 +67,16 @@ func Resolve(nameOrPath, dir string, opts ...DecodeOptions) (*Profile, error) {
 		return LoadFile(nameOrPath, opts...)
 	}
 	if dir != "" {
-		if p, err := LoadFile(fmt.Sprintf("%s/%s.yaml", dir, nameOrPath), opts...); err == nil {
+		p, err := LoadFile(fmt.Sprintf("%s/%s.yaml", dir, nameOrPath), opts...)
+		if err == nil {
 			return p, nil
+		}
+		// Only a missing file falls through to the builtin of the same name: a
+		// decode or validate error must surface, otherwise -profiles would hide
+		// an unknown key in the user's own profile behind a silently loaded
+		// builtin.
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
 		}
 	}
 	return builtin(nameOrPath, opts...)

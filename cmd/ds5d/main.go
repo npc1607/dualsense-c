@@ -81,8 +81,15 @@ func newHealthDevice(status *deviceStatus, stats sink.Stats) healthDevice {
 	d.Connected = true
 	d.Path = info.Path
 	d.Transport = info.Transport.String()
-	d.VendorID = fmt.Sprintf("%04x", info.Vendor)
-	d.ProductID = fmt.Sprintf("%04x", info.Product)
+	// Leave the identity empty when the descriptor could not be probed (forced
+	// -hidraw path, or a platform that failed to read the attributes) instead
+	// of inventing 0000; omitempty then drops the field.
+	if info.Vendor != 0 {
+		d.VendorID = fmt.Sprintf("%04x", info.Vendor)
+	}
+	if info.Product != 0 {
+		d.ProductID = fmt.Sprintf("%04x", info.Product)
+	}
 	return d
 }
 

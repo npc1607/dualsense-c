@@ -268,6 +268,24 @@ func (p *Profile) Validate() error {
 	if p.Source.Type == "" {
 		return fmt.Errorf("profile %s: source.type is required", p.Name)
 	}
+
+	// Non-empty rule names must be unique: StableRuleID is derived from the
+	// name, so duplicates would share one telemetry id and one reload timer
+	// slot. Anonymous rules (Name == "") stay allowed and keep their rules[i]
+	// label.
+	seen := make(map[string]int, len(p.Rules))
+	for i, r := range p.Rules {
+		if r.Name == "" {
+			continue
+		}
+		if first, ok := seen[r.Name]; ok {
+			return fmt.Errorf(
+				"profile %s: duplicate rule name %q (rules[%d] and rules[%d])",
+				p.Name, r.Name, first, i)
+		}
+		seen[r.Name] = i
+	}
+
 	for i, r := range p.Rules {
 		label := r.Name
 		if label == "" {

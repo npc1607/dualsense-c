@@ -36,6 +36,12 @@
 
 ## Unreleased
 
+### 破坏性变更：规则名必须唯一
+- `profile.Validate()` 现在拒绝同一 profile 内的重复非空规则名，错误会同时给出两个下标
+  （`profile X: duplicate rule name "foo" (rules[3] and rules[7])`）。此前重复名会静默共享
+  `rule_id`，并让 `profile.reload` 的 hold/cooldown 继承产生歧义。
+- 受影响：含重名规则的第三方 YAML 会在加载/重载时失败。修复方法：把重复的 `rules[].name`
+  改成唯一名字。匿名规则（`name: ""`）不受影响，可继续存在多条。
 
 ### 文档
 - README 新增「Windows 适配缺口」与「Windows 适配路线」：逐项列出未适配功能

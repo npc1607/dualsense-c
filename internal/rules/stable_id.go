@@ -16,6 +16,10 @@ import (
 //
 // The empty name still hashes deterministically (md5 of ""); callers should
 // prefer named rules so that a profile reorder cannot change their identity.
+//
+// Same name always maps to the same id, so profile.Validate rejects duplicate
+// non-empty rule names; do not remove that check or duplicate names will
+// silently share telemetry ids and reload timers.
 func StableRuleID(name string) uint16 {
 	sum := md5.Sum([]byte(name))
 	return binary.LittleEndian.Uint16(sum[0:2])

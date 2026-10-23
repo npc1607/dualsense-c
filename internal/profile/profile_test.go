@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,62 @@ func TestProfile_Builtins(t *testing.T) {
 	}
 	if !foundSouls {
 		t.Errorf("builtin profile souls not found")
+	}
+}
+
+func TestProfile_RejectsDuplicateRuleNames(t *testing.T) {
+	p := &Profile{
+		Name:   "dup",
+		Source: Source{Type: "sim"},
+		Rules: []Rule{
+			{Name: "a", Target: "rumble_left", Value: "1"},
+			{Name: "b", Target: "rumble_left", Value: "1"},
+			{Name: "c", Target: "rumble_left", Value: "1"},
+			{Name: "foo", Target: "rumble_left", Value: "1"},
+			{Name: "e", Target: "rumble_left", Value: "1"},
+			{Name: "f", Target: "rumble_left", Value: "1"},
+			{Name: "g", Target: "rumble_left", Value: "1"},
+			{Name: "foo", Target: "rumble_left", Value: "1"},
+		},
+	}
+	err := p.Validate()
+	if err == nil {
+		t.Fatal("expected duplicate rule names to fail validation")
+	}
+	msg := err.Error()
+	for _, want := range []string{`duplicate rule name "foo"`, "rules[3]", "rules[7]"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
+func TestProfile_AllowsAnonymousRules(t *testing.T) {
+	p := &Profile{
+		Name:   "anon",
+		Source: Source{Type: "sim"},
+		Rules: []Rule{
+			{Target: "lightbar", Params: map[string]string{"r": "1", "g": "2", "b": "3"}},
+			{Target: "lightbar", Params: map[string]string{"r": "4", "g": "5", "b": "6"}},
+		},
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("anonymous rules should validate, got: %v", err)
+	}
+}
+
+func TestProfile_SampleProfilesValidate(t *testing.T) {
+	profs, err := Dir("../../profiles")
+	if err != nil {
+		t.Fatalf("Dir(../../profiles) failed: %v", err)
+	}
+	if len(profs) == 0 {
+		t.Fatal("expected at least one sample profile")
+	}
+	for _, p := range profs {
+		if err := p.Validate(); err != nil {
+			t.Errorf("sample profile %q failed validation: %v", p.Name, err)
+		}
 	}
 }
 

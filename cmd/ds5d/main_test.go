@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/npc1607/dualsense-c/internal/device"
 	"github.com/npc1607/dualsense-c/internal/profile"
 	"github.com/npc1607/dualsense-c/internal/rules"
 	sig "github.com/npc1607/dualsense-c/internal/signal"
+	"github.com/npc1607/dualsense-c/internal/sink"
 )
 
 func newTestProfile() *profile.Profile {
@@ -416,4 +418,116 @@ func TestApplyReload_ConcurrentReads(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	close(stop)
 	wg.Wait()
+}
+
+func decodeHealth(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("health JSON is invalid: %v (raw=%s)", err, raw)
+	}
+	return got
+}
+
+// TestHealthDryRunShape checks that the appended device object is present and
+// well-formed when no controller is open, while every legacy field survives.
+func TestHealthDryRunShape(t *testing.T) {
+	start := time.Now().Add(-2 * time.Second)
+	raw, err := buildHealth(start, time.Now(), 3, 125, "fps", "sim", 42, nil, sink.Stats{})
+	if err != nil {
+		t.Fatalf("buildHealth: %v", err)
+	}
+	got := decodeHealth(t, raw)
+
+	for _, key := range []string{"uptime_s", "subscribers", "rate_hz", "profile", "source", "jitter_us", "device"} {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("health payload lost legacy field %q: %s", key, raw)
+		}
+	}
+
+	dev, ok := got["device"].(map[string]any)
+	if !ok {
+		t.Fatalf("device is not an object: %T", got["device"])
+	}
+	if connected, ok := dev["connected"].(bool); !ok || connected {
+		t.Fatalf("dry-run device.connected = %v, want false", dev["connected"])
+	}
+	for _, key := range []string{"path", "transport", "vendor_id", "product_id"} {
+		if _, ok := dev[key]; ok {
+			t.Fatalf("dry-run device must omit %q, got %v", key, dev[key])
+		}
+	}
+	if dev["write_errors"].(float64) != 0 || dev["reconnects"].(float64) != 0 {
+		t.Fatalf("dry-run counters = %v, want 0/0", dev)
+	}
+}
+
+// TestHealthConnectedDevice covers identity formatting and the cumulative sink
+// counters injected from the sink package.
+func TestHealthConnectedDevice(t *testing.T) {
+	cases := []struct {
+		name      string
+		transport device.Transport
+		want      string
+	}{
+		{"usb", device.USB, "usb"},
+		{"bluetooth", device.BT, "bluetooth"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status := &deviceStatus{
+				connected: true,
+				info: device.Info{
+					Path:      "/dev/hidraw3",
+					Vendor:    0x054c,
+					Product:   0x0ce6,
+					Transport: tc.transport,
+				},
+			}
+			raw, err := buildHealth(time.Now(), time.Now(), 1, 125, "fps", "trigger", 9,
+				status, sink.Stats{WriteErrors: 7, Reconnects: 2})
+			if err != nil {
+				t.Fatalf("buildHealth: %v", err)
+			}
+			dev := decodeHealth(t, raw)["device"].(map[string]any)
+			want := map[string]any{
+				"connected":    true,
+				"path":         "/dev/hidraw3",
+				"transport":    tc.want,
+				"vendor_id":    "054c",
+				"product_id":   "0ce6",
+				"write_errors": float64(7),
+				"reconnects":   float64(2),
+			}
+			for k, v := range want {
+				if dev[k] != v {
+					t.Fatalf("device[%q] = %v, want %v", k, dev[k], v)
+				}
+			}
+		})
+	}
+}
+
+// TestHealthDisconnectedAfterReopenFailure makes sure identity is omitted (but
+// counters remain queryable) when the sink could not reattach.
+func TestHealthDisconnectedAfterReopenFailure(t *testing.T) {
+	status := &deviceStatus{
+		connected: false,
+		info:      device.Info{Path: "/dev/hidraw3", Vendor: 0x054c, Product: 0x0ce6, Transport: device.USB},
+	}
+	raw, err := buildHealth(time.Now(), time.Now(), 0, 125, "fps", "trigger", 0,
+		status, sink.Stats{WriteErrors: 4, Reconnects: 0})
+	if err != nil {
+		t.Fatalf("buildHealth: %v", err)
+	}
+	dev := decodeHealth(t, raw)["device"].(map[string]any)
+	if dev["connected"] != false {
+		t.Fatalf("device.connected = %v, want false", dev["connected"])
+	}
+	if _, ok := dev["path"]; ok {
+		t.Fatalf("disconnected device leaked path: %v", dev["path"])
+	}
+	if dev["write_errors"] != float64(4) {
+		t.Fatalf("device.write_errors = %v, want 4", dev["write_errors"])
+	}
 }

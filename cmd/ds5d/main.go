@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -35,6 +36,74 @@ import (
 
 // version is injected at build time (-X main.version=...).
 var version = "dev"
+
+// deviceStatus is an immutable snapshot published for the health endpoint. The
+// sink goroutine (reopen callback) swaps the pointer while CMD1 handlers read
+// it, so the pointer itself is atomic.
+type deviceStatus struct {
+	connected bool
+	info      device.Info
+}
+
+// healthDevice is the `device` object appended to the health payload. Path and
+// identity fields are omitted while disconnected (dry-run or after a failed
+// reattach); connected and the cumulative counters are always present.
+type healthDevice struct {
+	Connected   bool   `json:"connected"`
+	Path        string `json:"path,omitempty"`
+	Transport   string `json:"transport,omitempty"`
+	VendorID    string `json:"vendor_id,omitempty"`
+	ProductID   string `json:"product_id,omitempty"`
+	Reconnects  uint64 `json:"reconnects"`
+	WriteErrors uint64 `json:"write_errors"`
+}
+
+// healthPayload keeps every pre-existing health field and appends `device`.
+type healthPayload struct {
+	UptimeS     float64      `json:"uptime_s"`
+	Subscribers int          `json:"subscribers"`
+	RateHz      int          `json:"rate_hz"`
+	Profile     string       `json:"profile"`
+	Source      string       `json:"source"`
+	JitterUS    uint32       `json:"jitter_us"`
+	Device      healthDevice `json:"device"`
+}
+
+func newHealthDevice(status *deviceStatus, stats sink.Stats) healthDevice {
+	d := healthDevice{
+		Reconnects:  stats.Reconnects,
+		WriteErrors: stats.WriteErrors,
+	}
+	if status == nil || !status.connected {
+		return d
+	}
+	info := status.info
+	d.Connected = true
+	d.Path = info.Path
+	d.Transport = info.Transport.String()
+	d.VendorID = fmt.Sprintf("%04x", info.Vendor)
+	d.ProductID = fmt.Sprintf("%04x", info.Product)
+	return d
+}
+
+func buildHealth(
+	start, now time.Time,
+	subscribers, rateHz int,
+	profileName, sourceType string,
+	jitterUS uint32,
+	status *deviceStatus,
+	stats sink.Stats,
+) ([]byte, error) {
+	return json.Marshal(healthPayload{
+		UptimeS:     now.Sub(start).Seconds(),
+		Subscribers: subscribers,
+		RateHz:      rateHz,
+		Profile:     profileName,
+		Source:      sourceType,
+		JitterUS:    jitterUS,
+		Device:      newHealthDevice(status, stats),
+	})
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -155,15 +224,20 @@ func run() error {
 		}
 	})
 
-	var dev device.Device
+	var (
+		dev       device.Device
+		devStatus atomic.Pointer[deviceStatus]
+	)
 	if !*dryRun {
 		dev, err = openDevice(ctx, *hidrawPath, logger)
 		if err != nil {
 			return err
 		}
 		defer dev.Close()
+		devStatus.Store(&deviceStatus{connected: true, info: dev.Info()})
 		logger.Printf("controller: %s", dev.Info())
 	}
+	sinkCounters := sink.NewCounters()
 
 	// Source -> signal store.
 	frames := make(chan sig.Frame, 64)
@@ -209,13 +283,13 @@ func run() error {
 		lastFrameMu    sync.RWMutex
 		lastFrame      hid.Frame
 		lastTick       time.Time
-		tickJitterUS   uint32
 		previewMu      sync.RWMutex
 		previewTarget  string
 		previewTrigger hid.Trigger
 		previewExpire  time.Time
 	)
 
+	var tickJitterUS atomic.Uint32
 	stateTicker := time.NewTicker(time.Second / 30) // default 30Hz
 	defer stateTicker.Stop()
 
@@ -235,8 +309,8 @@ func run() error {
 
 				lastFrameMu.RLock()
 				curF := lastFrame
-				jitter := tickJitterUS
 				lastFrameMu.RUnlock()
+				jitter := tickJitterUS.Load()
 
 				muteByte := uint8(0)
 				if curF.MuteLED {
@@ -277,14 +351,16 @@ func run() error {
 			switch cmd.Method {
 			case "health":
 				cur := currentProfile()
-				res, _ := json.Marshal(map[string]any{
-					"uptime_s":    time.Since(startTime).Seconds(),
-					"subscribers": sigServer.Subscribers(),
-					"rate_hz":     *rate,
-					"profile":     cur.Name,
-					"source":      cur.Source.Type,
-					"jitter_us":   tickJitterUS,
-				})
+				res, err := buildHealth(
+					startTime, time.Now(),
+					sigServer.Subscribers(), *rate,
+					cur.Name, cur.Source.Type,
+					tickJitterUS.Load(),
+					devStatus.Load(), sinkCounters.Snapshot(),
+				)
+				if err != nil {
+					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
+				}
 				return ipc.Response{ID: cmd.ID, OK: true, Result: res}
 
 			case "state.subscribe":
@@ -399,7 +475,7 @@ func run() error {
 			if jitter < 0 {
 				jitter = -jitter
 			}
-			tickJitterUS = uint32(jitter.Microseconds())
+			tickJitterUS.Store(uint32(jitter.Microseconds()))
 		}
 		lastTick = now
 
@@ -468,21 +544,31 @@ func run() error {
 
 	logger.Printf("driving %s at %d Hz", dev.Info().Path, *rate)
 	s := sink.New(dev, *rate, logger)
+	s.SetCounters(sinkCounters)
 	// Survive a USB re-enumeration: the hidraw node changes number when the
 	// controller is unplugged or the link resets, so re-find it instead of
 	// writing into a dead fd.
 	s.SetReopen(func(old device.Device) (device.Device, error) {
+		lastInfo := old.Info()
 		_ = old.Close()
 		if *hidrawPath != "" {
 			if d, err := device.OpenPath(*hidrawPath); err == nil {
+				devStatus.Store(&deviceStatus{connected: true, info: d.Info()})
 				return d, nil
 			}
 		}
 		info, err := device.Find()
 		if err != nil {
+			devStatus.Store(&deviceStatus{connected: false, info: lastInfo})
 			return nil, err
 		}
-		return device.Open(info)
+		d, err := device.Open(info)
+		if err != nil {
+			devStatus.Store(&deviceStatus{connected: false, info: info})
+			return nil, err
+		}
+		devStatus.Store(&deviceStatus{connected: true, info: d.Info()})
+		return d, nil
 	})
 	return s.Run(ctx, produce)
 }

@@ -80,6 +80,22 @@ func run() error {
 	}
 	logger.Printf("profile %q (%s), source %q", p.Name, p.Title, p.Source.Type)
 
+	// profileMu guards the active profile pointer: profile.reload swaps it from
+	// an IPC goroutine while the STATE1 ticker, the sink loop and the other
+	// CMD1 handlers read it. Loaded profiles are treated as immutable, so the
+	// accessor may hand out the pointer itself.
+	var profileMu sync.RWMutex
+	currentProfile := func() *profile.Profile {
+		profileMu.RLock()
+		defer profileMu.RUnlock()
+		return p
+	}
+	setProfile := func(np *profile.Profile) {
+		profileMu.Lock()
+		p = np
+		profileMu.Unlock()
+	}
+
 	shapers := make(map[string]sig.Shaper, len(p.Shape))
 	for name, s := range p.Shape {
 		shapers[name] = sig.Shaper{
@@ -185,7 +201,7 @@ func run() error {
 	}()
 
 	if *trace {
-		go traceSignals(ctx, set, p, logger)
+		go traceSignals(ctx, set, func() time.Duration { return currentProfile().TTL() }, logger)
 	}
 
 	startTime := time.Now()
@@ -214,7 +230,7 @@ func run() error {
 					continue
 				}
 				stateSeq++
-				sigTelem := set.Telemetry(tNow, p.TTL())
+				sigTelem := set.Telemetry(tNow, currentProfile().TTL())
 				ruleTelem := engine.Telemetry(tNow)
 
 				lastFrameMu.RLock()
@@ -260,12 +276,13 @@ func run() error {
 		sigServer.SetCommandHandler(func(cmd ipc.Command) ipc.Response {
 			switch cmd.Method {
 			case "health":
+				cur := currentProfile()
 				res, _ := json.Marshal(map[string]any{
 					"uptime_s":    time.Since(startTime).Seconds(),
 					"subscribers": sigServer.Subscribers(),
 					"rate_hz":     *rate,
-					"profile":     p.Name,
-					"source":      p.Source.Type,
+					"profile":     cur.Name,
+					"source":      cur.Source.Type,
 					"jitter_us":   tickJitterUS,
 				})
 				return ipc.Response{ID: cmd.ID, OK: true, Result: res}
@@ -304,11 +321,11 @@ func run() error {
 				if err := engine.Reload(newP); err != nil {
 					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
 				}
-				p = newP
+				setProfile(newP)
 				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"reloaded":true}`)}
 
 			case "profile.apply":
-				applied, ignored, reasons, err := applyShapePatch(p, set, cmd.Params)
+				applied, ignored, reasons, err := applyShapePatch(currentProfile().Extra, set, cmd.Params)
 				if err != nil {
 					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
 				}
@@ -413,7 +430,7 @@ func run() error {
 		previewMu.RUnlock()
 
 		if statusBar {
-			if set.Fresh(now, p.TTL()) {
+			if set.Fresh(now, currentProfile().TTL()) {
 				f.Lightbar = [3]uint8{0, 255, 0} // live
 			} else {
 				f.Lightbar = [3]uint8{255, 200, 0} // idle
@@ -521,7 +538,7 @@ func validateShapePatch(fp shapeFieldPatch, sh sig.Shaper) string {
 // We avoid writing back into p.Shape so the handler never mutates a map shared
 // with engine.Simulate / Engine.Reload.
 func applyShapePatch(
-	p *profile.Profile,
+	extra []string,
 	set *sig.Set,
 	raw json.RawMessage,
 ) (applied, ignored []string, reasons map[string]string, err error) {
@@ -544,9 +561,18 @@ func applyShapePatch(
 	patch := make(map[string]sig.Shaper, len(params.Shape))
 
 	for name, fp := range params.Shape {
-		if !sig.IsStandard(name) && !slices.Contains(p.Extra, name) {
+		if !sig.IsStandard(name) && !slices.Contains(extra, name) {
 			ignored = append(ignored, name)
 			reasons[name] = "unknown signal"
+			continue
+		}
+
+		// A field name we do not know (a typo, or the pre-snake_case spelling)
+		// decodes to all-nil pointers, so reject it instead of reporting the
+		// signal as applied while nothing changed.
+		if fp.Deadzone == nil && fp.Gamma == nil && fp.SlewUp == nil && fp.SlewDown == nil {
+			ignored = append(ignored, name)
+			reasons[name] = "no recognised fields"
 			continue
 		}
 
@@ -620,7 +646,10 @@ func trigger(t hid.Trigger) string {
 	return fmt.Sprintf("%s[%d %d %d]", t.Mode, t.P[0], t.P[1], t.P[2])
 }
 
-func traceSignals(ctx context.Context, set *sig.Set, p *profile.Profile, logger *log.Logger) {
+// traceSignals logs signal values twice per second.
+//
+// ttl is a function so a profile.reload mid-trace takes effect immediately.
+func traceSignals(ctx context.Context, set *sig.Set, ttl func() time.Duration, logger *log.Logger) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -628,7 +657,7 @@ func traceSignals(ctx context.Context, set *sig.Set, p *profile.Profile, logger 
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			vals, _ := set.Snapshot(now, p.TTL())
+			vals, _ := set.Snapshot(now, ttl())
 			if len(vals) == 0 {
 				logger.Printf("signals: (none)")
 				continue

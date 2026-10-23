@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/npc1607/dualsense-c/internal/profile"
@@ -24,7 +25,7 @@ func TestApplyShapePatch_JSONTagAndMerge(t *testing.T) {
 		"r2": {Gamma: 1.5},
 	})
 
-	applied, ignored, reasons, err := applyShapePatch(p, set,
+	applied, ignored, reasons, err := applyShapePatch(p.Extra, set,
 		json.RawMessage(`{"shape":{"l2":{"slew_up":10},"r2":{"deadzone":0.2}}}`))
 	if err != nil {
 		t.Fatalf("applyShapePatch failed: %v", err)
@@ -68,7 +69,7 @@ func TestApplyShapePatch_RejectsBadInput(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			set := sig.NewSet(map[string]sig.Shaper{"l2": {Deadzone: 0.4}})
-			applied, ignored, reasons, err := applyShapePatch(newTestProfile(), set, tc.raw)
+			applied, ignored, reasons, err := applyShapePatch(newTestProfile().Extra, set, tc.raw)
 			if err == nil {
 				t.Fatalf("expected error for %s", tc.name)
 			}
@@ -90,7 +91,7 @@ func TestApplyShapePatch_UnknownAndExtraSignals(t *testing.T) {
 	p := newTestProfile()
 	set := sig.NewSet(nil)
 
-	applied, ignored, reasons, err := applyShapePatch(p, set,
+	applied, ignored, reasons, err := applyShapePatch(p.Extra, set,
 		json.RawMessage(`{"shape":{"nope":{"gamma":1}}}`))
 	if err != nil {
 		t.Fatalf("applyShapePatch failed: %v", err)
@@ -107,7 +108,7 @@ func TestApplyShapePatch_UnknownAndExtraSignals(t *testing.T) {
 
 	// Signals declared in the profile's `signals:` extension list are accepted.
 	p.Extra = []string{"custom_xyz"}
-	applied, ignored, _, err = applyShapePatch(p, set,
+	applied, ignored, _, err = applyShapePatch(p.Extra, set,
 		json.RawMessage(`{"shape":{"custom_xyz":{"gamma":1.2}}}`))
 	if err != nil {
 		t.Fatalf("applyShapePatch failed: %v", err)
@@ -136,7 +137,7 @@ func TestApplyShapePatch_OutOfRangeValues(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			set := sig.NewSet(map[string]sig.Shaper{"l2": {Deadzone: 0.4, Gamma: 1.1}})
-			applied, ignored, reasons, err := applyShapePatch(newTestProfile(), set, json.RawMessage(tc.raw))
+			applied, ignored, reasons, err := applyShapePatch(newTestProfile().Extra, set, json.RawMessage(tc.raw))
 			if err != nil {
 				t.Fatalf("applyShapePatch returned error: %v", err)
 			}
@@ -159,7 +160,7 @@ func TestApplyShapePatch_OutOfRangeValues(t *testing.T) {
 func TestApplyShapePatch_MixedValidAndInvalid(t *testing.T) {
 	set := sig.NewSet(map[string]sig.Shaper{"r2": {Gamma: 1.5}})
 
-	applied, ignored, reasons, err := applyShapePatch(newTestProfile(), set,
+	applied, ignored, reasons, err := applyShapePatch(newTestProfile().Extra, set,
 		json.RawMessage(`{"shape":{"l2":{"deadzone":0.2},"r2":{"gamma":0},"nope":{"gamma":1}}}`))
 	if err != nil {
 		t.Fatalf("applyShapePatch failed: %v", err)
@@ -179,4 +180,69 @@ func TestApplyShapePatch_MixedValidAndInvalid(t *testing.T) {
 	if sh, _ := set.GetShaper("l2"); sh.Deadzone != 0.2 {
 		t.Fatalf("l2.Deadzone = %v, want 0.2", sh.Deadzone)
 	}
+}
+
+// TestApplyShapePatch_RejectsUnknownFields covers the reviewer's "silent
+// ignore" case at field granularity: a typo or a pre-snake_case spelling
+// decodes to all-nil pointers, so the entry must be rejected instead of being
+// reported as applied while nothing changed.
+func TestApplyShapePatch_RejectsUnknownFields(t *testing.T) {
+	for _, raw := range []string{
+		`{"shape":{"l2":{"SlewUp":10}}}`, // old camelCase spelling
+		`{"shape":{"l2":{"slewup":10}}}`, // typo
+		`{"shape":{"l2":{}}}`,            // no fields at all
+	} {
+		set := sig.NewSet(map[string]sig.Shaper{"l2": {Deadzone: 0.1}})
+		applied, ignored, reasons, err := applyShapePatch(nil, set, json.RawMessage(raw))
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", raw, err)
+		}
+		if len(applied) != 0 {
+			t.Fatalf("%s: applied = %v, want empty", raw, applied)
+		}
+		if !reflect.DeepEqual(ignored, []string{"l2"}) || reasons["l2"] != "no recognised fields" {
+			t.Fatalf("%s: ignored = %v, reasons = %v", raw, ignored, reasons)
+		}
+		if sh, _ := set.GetShaper("l2"); sh.Deadzone != 0.1 || sh.SlewUp != 0 {
+			t.Fatalf("%s: shaper mutated: %+v", raw, sh)
+		}
+	}
+}
+
+// TestProfileAccessorsAreRaceFree exercises the accessor pair used by
+// profile.reload against concurrent readers (run with -race to be meaningful).
+func TestProfileAccessorsAreRaceFree(t *testing.T) {
+	var mu sync.RWMutex
+	active := newTestProfile()
+	current := func() *profile.Profile {
+		mu.RLock()
+		defer mu.RUnlock()
+		return active
+	}
+	set := func(p *profile.Profile) {
+		mu.Lock()
+		active = p
+		mu.Unlock()
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				next := newTestProfile()
+				next.Name = "reloaded"
+				set(next)
+			}
+		}(i)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				_ = current().TTL()
+				_ = current().Extra
+			}
+		}()
+	}
+	wg.Wait()
 }

@@ -3,10 +3,12 @@ package ipc_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/npc1607/dualsense-c/internal/profile"
 	"github.com/npc1607/dualsense-c/internal/rules"
 	"github.com/npc1607/dualsense-c/internal/signal"
 	"github.com/npc1607/dualsense-c/internal/vpad/ipc"
@@ -138,5 +140,63 @@ func TestCommandRPC(t *testing.T) {
 	}
 	if string(resp.Result) != `{"pong":true}` {
 		t.Fatalf("unexpected result: %s", string(resp.Result))
+	}
+}
+
+// TestStateFrameCarriesStableRuleID pins the 13-byte rule item layout while
+// checking that the daemon-side telemetry id is the hash-derived stable id,
+// not the rule's index in the compiled slice.
+func TestStateFrameCarriesStableRuleID(t *testing.T) {
+	p := &profile.Profile{
+		Name:   "stable",
+		Source: profile.Source{Type: "sim"},
+		Rules: []profile.Rule{
+			{Name: "wall", Target: "rumble_left", Value: "10", Priority: 20},
+			{Name: "curb", Target: "rumble_left", Value: "20", Priority: 10},
+		},
+	}
+	eng, err := rules.New(p, signal.NewSet(nil), nil)
+	if err != nil {
+		t.Fatalf("rules.New: %v", err)
+	}
+	telem := eng.Telemetry(time.Now())
+	if len(telem) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(telem))
+	}
+	// Priority ascending: curb (10) then wall (20).
+	if telem[0].Name != "curb" || telem[1].Name != "wall" {
+		t.Fatalf("unexpected telemetry order: %+v", telem)
+	}
+	if telem[0].RuleID != rules.StableRuleID("curb") || telem[1].RuleID != rules.StableRuleID("wall") {
+		t.Fatalf("telemetry ids are not name-derived: %+v", telem)
+	}
+	frame := ipc.EncodeStateFrame(ipc.StateHeader{Seq: 1}, nil, telem, ipc.StateSummary{})
+	wantLen := ipc.StateHeaderSize + 2*ipc.StateRuleItemSize + ipc.StateSummarySize
+	if len(frame) != wantLen {
+		t.Fatalf("frame length = %d, want %d (13B rule item must not change)", len(frame), wantLen)
+	}
+	// RuleID is the first field of each 13-byte item.
+	for i, want := range []uint16{rules.StableRuleID("curb"), rules.StableRuleID("wall")} {
+		off := ipc.StateHeaderSize + i*ipc.StateRuleItemSize
+		if got := binary.LittleEndian.Uint16(frame[off : off+2]); got != want {
+			t.Fatalf("rule[%d] wire id = %d, want %d", i, got, want)
+		}
+		// State (1B) + Priority (2B) + LastFireMS (4B) + UntilMS (4B) = 12B follow the id.
+		if got := binary.LittleEndian.Uint16(frame[off+3 : off+5]); int16(got) != telem[i].Priority {
+			t.Fatalf("rule[%d] priority = %d, want %d", i, int16(got), telem[i].Priority)
+		}
+	}
+
+	hdr, _, decoded, _, err := ipc.DecodeStateFrame(frame)
+	if err != nil {
+		t.Fatalf("DecodeStateFrame: %v", err)
+	}
+	if hdr.RuleCount != 2 {
+		t.Fatalf("decoded RuleCount = %d, want 2", hdr.RuleCount)
+	}
+	for i := range telem {
+		if decoded[i].RuleID != telem[i].RuleID {
+			t.Fatalf("rule[%d] id changed in roundtrip: %d -> %d", i, telem[i].RuleID, decoded[i].RuleID)
+		}
 	}
 }

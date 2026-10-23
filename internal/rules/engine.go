@@ -32,6 +32,8 @@ const (
 
 // RuleTelemetry exposes rule execution decisions and timing for UI inspection.
 type RuleTelemetry struct {
+	// RuleID is stable across reloads: it is derived from Name via
+	// StableRuleID (md5 prefix, little endian), not from the slice index.
 	RuleID     uint16 `json:"rule_id"`
 	Name       string `json:"name"`
 	Target     string `json:"target"`
@@ -745,7 +747,7 @@ func (e *Engine) Telemetry(now time.Time) []RuleTelemetry {
 			}
 		}
 		out[i] = RuleTelemetry{
-			RuleID:     uint16(i),
+			RuleID:     StableRuleID(r.name),
 			Name:       r.name,
 			Target:     string(r.target),
 			Priority:   int16(r.priority),

@@ -167,7 +167,7 @@ rules:
     modulate: { type: square, hz: 30, depth: 0.6 }
 
   # ---- 每枪一记左手重击（大电机），用低频能量驱动 ------------------------
-  - name: shot-left
+  - name: shot-left-bass
     when: 'has("bass") && bass > 0.10'
     target: rumble_left
     priority: 35

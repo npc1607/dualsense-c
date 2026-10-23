@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	ossignal "os/signal"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -307,13 +308,16 @@ func run() error {
 				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"reloaded":true}`)}
 
 			case "profile.apply":
-				var params struct {
-					Shape map[string]sig.Shaper `json:"shape"`
+				applied, ignored, reasons, err := applyShapePatch(p, set, cmd.Params)
+				if err != nil {
+					return ipc.Response{ID: cmd.ID, OK: false, Error: err.Error()}
 				}
-				if err := json.Unmarshal(cmd.Params, &params); err == nil && len(params.Shape) > 0 {
-					set.SetShapers(params.Shape)
-				}
-				return ipc.Response{ID: cmd.ID, OK: true, Result: json.RawMessage(`{"applied":true}`)}
+				res, _ := json.Marshal(map[string]any{
+					"applied": applied,
+					"ignored": ignored,
+					"reasons": reasons,
+				})
+				return ipc.Response{ID: cmd.ID, OK: true, Result: res}
 
 			case "effect.preview":
 				var params struct {
@@ -477,6 +481,99 @@ func run() error {
 		return device.Open(info)
 	})
 	return s.Run(ctx, produce)
+}
+
+// shapeFieldPatch uses pointers so we can distinguish an omitted field from an
+// explicit zero (needed to reject gamma:0 while still allowing gamma to be
+// omitted).
+type shapeFieldPatch struct {
+	Deadzone *float64 `json:"deadzone"`
+	Gamma    *float64 `json:"gamma"`
+	SlewUp   *float64 `json:"slew_up"`
+	SlewDown *float64 `json:"slew_down"`
+}
+
+// validateShapePatch checks only the fields the request explicitly set, so a
+// profile's "zero means disabled" values are never mistaken for out-of-range.
+// Reasons are returned in a fixed field order for predictable responses.
+func validateShapePatch(fp shapeFieldPatch, sh sig.Shaper) string {
+	if fp.Deadzone != nil && (sh.Deadzone < 0 || sh.Deadzone > 1) {
+		return "deadzone must be between 0 and 1"
+	}
+	if fp.Gamma != nil && sh.Gamma <= 0 {
+		return "gamma must be > 0"
+	}
+	if fp.SlewUp != nil && sh.SlewUp < 0 {
+		return "slew_up must be >= 0"
+	}
+	if fp.SlewDown != nil && sh.SlewDown < 0 {
+		return "slew_down must be >= 0"
+	}
+	return ""
+}
+
+// applyShapePatch merges a partial shape patch into the live signal set and
+// reports per-key results.
+//
+// The merge base is the current runtime shaper (initialised from p.Shape and
+// replaced wholesale by profile.reload), so patches are runtime-only:
+// profile.reload re-reads the YAML profile and intentionally discards them.
+// We avoid writing back into p.Shape so the handler never mutates a map shared
+// with engine.Simulate / Engine.Reload.
+func applyShapePatch(
+	p *profile.Profile,
+	set *sig.Set,
+	raw json.RawMessage,
+) (applied, ignored []string, reasons map[string]string, err error) {
+	if len(raw) == 0 {
+		return nil, nil, nil, fmt.Errorf("params.shape is required")
+	}
+
+	var params struct {
+		Shape map[string]shapeFieldPatch `json:"shape"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, nil, nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if len(params.Shape) == 0 {
+		return nil, nil, nil, fmt.Errorf("params.shape must contain at least one signal")
+	}
+
+	ignored = []string{}
+	reasons = make(map[string]string)
+	patch := make(map[string]sig.Shaper, len(params.Shape))
+
+	for name, fp := range params.Shape {
+		if !sig.IsStandard(name) && !slices.Contains(p.Extra, name) {
+			ignored = append(ignored, name)
+			reasons[name] = "unknown signal"
+			continue
+		}
+
+		sh, _ := set.GetShaper(name)
+		if fp.Deadzone != nil {
+			sh.Deadzone = *fp.Deadzone
+		}
+		if fp.Gamma != nil {
+			sh.Gamma = *fp.Gamma
+		}
+		if fp.SlewUp != nil {
+			sh.SlewUp = *fp.SlewUp
+		}
+		if fp.SlewDown != nil {
+			sh.SlewDown = *fp.SlewDown
+		}
+		if reason := validateShapePatch(fp, sh); reason != "" {
+			ignored = append(ignored, name)
+			reasons[name] = reason
+			continue
+		}
+		patch[name] = sh
+	}
+
+	applied = set.MergeShapers(patch)
+	sort.Strings(ignored)
+	return applied, ignored, reasons, nil
 }
 
 func openDevice(ctx context.Context, path string, logger *log.Logger) (device.Device, error) {

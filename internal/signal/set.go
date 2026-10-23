@@ -2,6 +2,7 @@ package signal
 
 import (
 	"math"
+	"sort"
 	"sync"
 	"time"
 )
@@ -19,10 +20,10 @@ type Frame struct {
 //	Deadzone zeroes small magnitudes (useful for stick/trigger noise).
 //	Gamma < 1 makes small inputs bigger, > 1 compresses them.
 type Shaper struct {
-	Deadzone float64 `yaml:"deadzone"`
-	Gamma    float64 `yaml:"gamma"`
-	SlewUp   float64 `yaml:"slew_up"`
-	SlewDown float64 `yaml:"slew_down"`
+	Deadzone float64 `json:"deadzone" yaml:"deadzone"`
+	Gamma    float64 `json:"gamma" yaml:"gamma"`
+	SlewUp   float64 `json:"slew_up" yaml:"slew_up"`
+	SlewDown float64 `json:"slew_down" yaml:"slew_down"`
 }
 
 func (s Shaper) apply(prev, raw float64, dt time.Duration) float64 {
@@ -171,4 +172,30 @@ func (s *Set) SetShapers(shapers map[string]Shaper) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.shapers = shapers
+}
+
+// GetShaper returns the shaping curve currently configured for name.
+func (s *Set) GetShaper(name string) (Shaper, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sh, ok := s.shapers[name]
+	return sh, ok
+}
+
+// MergeShapers applies patch entries over the current shaper map, leaving
+// every signal not named in the patch untouched. It returns the applied keys
+// sorted for deterministic IPC responses (never nil, so JSON renders []).
+func (s *Set) MergeShapers(patch map[string]Shaper) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shapers == nil {
+		s.shapers = make(map[string]Shaper, len(patch))
+	}
+	keys := make([]string, 0, len(patch))
+	for name, sh := range patch {
+		s.shapers[name] = sh
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+	return keys
 }
